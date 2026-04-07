@@ -11,6 +11,14 @@ const waiverSchema = new mongoose.Schema(
       email: { type: String, required: true, trim: true },
       emergencyContact: { type: String, required: true, trim: true }
     },
+    isMinor: { type: Boolean, default: false },
+    guardian: {
+      fullName: { type: String, trim: true, default: "" },
+      relation: { type: String, trim: true, default: "" },
+      phone: { type: String, trim: true, default: "" },
+      email: { type: String, trim: true, default: "" },
+      signatureImage: { type: String, default: "" }
+    },
     answers: {
       hasMedicalCondition: { type: Boolean, required: true },
       consumedAlcoholOrDrugs: { type: Boolean, required: true },

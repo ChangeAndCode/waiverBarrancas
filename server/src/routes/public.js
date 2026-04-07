@@ -11,6 +11,16 @@ function baseUrlFromRequest(req) {
   return `${proto}://${host}`;
 }
 
+function calculateAge(birthDateString) {
+  const birthDate = new Date(birthDateString);
+  if (Number.isNaN(birthDate.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const m = today.getMonth() - birthDate.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) age -= 1;
+  return age;
+}
+
 export function publicRoutes({ jwtSecret }) {
   const router = Router();
 
@@ -26,13 +36,51 @@ export function publicRoutes({ jwtSecret }) {
   });
 
   router.post("/waivers", async (req, res) => {
-    const { attractionId, participant, answers, acceptedText, signatureName, signatureImage } = req.body ?? {};
+    const {
+      attractionId,
+      participant,
+      answers,
+      acceptedText,
+      signatureName,
+      signatureImage,
+      guardian
+    } = req.body ?? {};
 
     if (!attractionId || !participant || !answers || acceptedText !== true || !signatureName || !signatureImage) {
       return res.status(400).json({ error: "Datos incompletos." });
     }
     if (!String(signatureImage).startsWith("data:image/png;base64,")) {
       return res.status(400).json({ error: "Firma manuscrita invalida." });
+    }
+    const requiredParticipant =
+      participant.fullName &&
+      participant.birthDate &&
+      participant.phone &&
+      participant.email &&
+      participant.emergencyContact;
+    if (!requiredParticipant) {
+      return res.status(400).json({ error: "Todos los campos del participante son obligatorios." });
+    }
+    if (answers.acceptsSafetyRules !== true) {
+      return res.status(400).json({ error: "Debes aceptar reglas de seguridad." });
+    }
+
+    const age = calculateAge(participant.birthDate);
+    if (age === null || age < 0) return res.status(400).json({ error: "Fecha de nacimiento invalida." });
+    const isMinor = age < 18;
+
+    if (isMinor) {
+      const guardianValid =
+        guardian &&
+        guardian.fullName &&
+        guardian.relation &&
+        guardian.phone &&
+        guardian.email &&
+        guardian.signatureImage &&
+        String(guardian.signatureImage).startsWith("data:image/png;base64,");
+      if (!guardianValid) {
+        return res.status(400).json({ error: "Para menores de edad, los datos y firma del tutor son obligatorios." });
+      }
     }
 
     const attraction = await Attraction.findOne({ _id: attractionId, active: true }).lean();
@@ -43,6 +91,8 @@ export function publicRoutes({ jwtSecret }) {
       attractionId: attraction._id,
       attractionName: attraction.name,
       participant,
+      isMinor,
+      guardian: isMinor ? guardian : undefined,
       answers,
       acceptedText,
       signatureName,

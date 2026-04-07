@@ -9,6 +9,9 @@
   let qrCanvas;
   let signatureCanvas;
   let signatureHasStroke = false;
+  let guardianSignatureCanvas;
+  let guardianSignatureHasStroke = false;
+  let guardianModalOpen = false;
 
   let authToken = localStorage.getItem("authToken") || "";
   let authUser = JSON.parse(localStorage.getItem("authUser") || "null");
@@ -39,6 +42,26 @@
     acceptsSafetyRules: true,
     acceptedText: false
   };
+  let guardian = {
+    fullName: "",
+    relation: "",
+    phone: "",
+    email: ""
+  };
+
+  function getAge(birthDateString) {
+    if (!birthDateString) return null;
+    const birthDate = new Date(birthDateString);
+    if (Number.isNaN(birthDate.getTime())) return null;
+    const today = new Date();
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const m = today.getMonth() - birthDate.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) age -= 1;
+    return age;
+  }
+
+  $: participantAge = getAge(form.birthDate);
+  $: isMinor = participantAge !== null && participantAge < 18;
 
   function signaturePad(node) {
     const ctx = node.getContext("2d");
@@ -94,11 +117,95 @@
     };
   }
 
+  function guardianSignaturePad(node) {
+    const ctx = node.getContext("2d");
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "#1f4a3b";
+
+    let drawing = false;
+
+    function pointFromEvent(event) {
+      const rect = node.getBoundingClientRect();
+      const source = event.touches?.[0] || event;
+      return { x: source.clientX - rect.left, y: source.clientY - rect.top };
+    }
+
+    function start(event) {
+      event.preventDefault();
+      drawing = true;
+      const p = pointFromEvent(event);
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+    }
+
+    function move(event) {
+      if (!drawing) return;
+      event.preventDefault();
+      const p = pointFromEvent(event);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+      guardianSignatureHasStroke = true;
+    }
+
+    function end() {
+      drawing = false;
+    }
+
+    node.addEventListener("mousedown", start);
+    node.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", end);
+    node.addEventListener("touchstart", start, { passive: false });
+    node.addEventListener("touchmove", move, { passive: false });
+    window.addEventListener("touchend", end);
+
+    return {
+      destroy() {
+        node.removeEventListener("mousedown", start);
+        node.removeEventListener("mousemove", move);
+        window.removeEventListener("mouseup", end);
+        node.removeEventListener("touchstart", start);
+        node.removeEventListener("touchmove", move);
+        window.removeEventListener("touchend", end);
+      }
+    };
+  }
+
   function clearSignature() {
     if (!signatureCanvas) return;
     const ctx = signatureCanvas.getContext("2d");
     ctx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
     signatureHasStroke = false;
+  }
+
+  function clearGuardianSignature() {
+    if (!guardianSignatureCanvas) return;
+    const ctx = guardianSignatureCanvas.getContext("2d");
+    ctx.clearRect(0, 0, guardianSignatureCanvas.width, guardianSignatureCanvas.height);
+    guardianSignatureHasStroke = false;
+  }
+
+  function hasRequiredParticipantFields() {
+    return (
+      !!selectedAttractionId &&
+      !!form.fullName.trim() &&
+      !!form.birthDate &&
+      !!form.phone.trim() &&
+      !!form.email.trim() &&
+      !!form.emergencyContact.trim() &&
+      form.acceptedText === true &&
+      form.acceptsSafetyRules === true
+    );
+  }
+
+  function hasRequiredGuardianFields() {
+    return (
+      !!guardian.fullName.trim() &&
+      !!guardian.relation.trim() &&
+      !!guardian.phone.trim() &&
+      !!guardian.email.trim() &&
+      guardianSignatureHasStroke
+    );
   }
 
   function goTo(url) {
@@ -137,13 +244,25 @@
   async function submitWaiver() {
     loading = true;
     message = "";
+    if (!hasRequiredParticipantFields()) {
+      loading = false;
+      message = "Todos los campos son obligatorios y debes aceptar reglas y carta responsiva.";
+      return;
+    }
     if (!signatureHasStroke || !signatureCanvas) {
       loading = false;
       message = "La firma manuscrita es obligatoria.";
       return;
     }
+    if (isMinor && !hasRequiredGuardianFields()) {
+      loading = false;
+      guardianModalOpen = true;
+      message = "El participante es menor de edad. Captura datos y firma del tutor.";
+      return;
+    }
     try {
       const signatureImage = signatureCanvas.toDataURL("image/png");
+      const guardianSignatureImage = guardianSignatureCanvas?.toDataURL("image/png");
       waiverResult = await api("/public/waivers", "POST", {
         attractionId: selectedAttractionId,
         participant: {
@@ -160,7 +279,16 @@
         },
         acceptedText: form.acceptedText,
         signatureName: form.fullName,
-        signatureImage
+        signatureImage,
+        guardian: isMinor
+          ? {
+              fullName: guardian.fullName,
+              relation: guardian.relation,
+              phone: guardian.phone,
+              email: guardian.email,
+              signatureImage: guardianSignatureImage
+            }
+          : undefined
       });
       setTimeout(() => {
         if (qrCanvas && waiverResult?.qrUrl) QRCode.toCanvas(qrCanvas, waiverResult.qrUrl);
@@ -410,10 +538,16 @@
         {/each}
       </select>
       <input bind:value={form.fullName} placeholder="Nombre completo" />
-      <input bind:value={form.birthDate} placeholder="Fecha de nacimiento (YYYY-MM-DD)" />
+      <input type="date" bind:value={form.birthDate} />
       <input bind:value={form.phone} placeholder="Telefono" />
       <input bind:value={form.email} placeholder="Email" />
       <input bind:value={form.emergencyContact} placeholder="Contacto de emergencia" />
+      {#if isMinor}
+        <p class="bad">Participante menor de edad: se requiere tutor y firma manuscrita del tutor.</p>
+        <button type="button" on:click={() => (guardianModalOpen = true)}>
+          {hasRequiredGuardianFields() ? "Editar datos de tutor" : "Capturar datos de tutor"}
+        </button>
+      {/if}
 
       <label><input type="checkbox" bind:checked={form.hasMedicalCondition} /> Tengo condicion medica relevante</label>
       <label><input type="checkbox" bind:checked={form.consumedAlcoholOrDrugs} /> Consumi alcohol o drogas hoy</label>
@@ -427,6 +561,24 @@
       <button type="button" on:click={clearSignature}>Limpiar firma</button>
       <button on:click={submitWaiver} disabled={loading}>{loading ? "Guardando..." : "Firmar y generar QR"}</button>
     </section>
+
+    {#if guardianModalOpen}
+      <section class="modal-backdrop">
+        <div class="modal-card">
+          <h3>Datos de tutor o padre/madre</h3>
+          <input bind:value={guardian.fullName} placeholder="Nombre completo del tutor" />
+          <input bind:value={guardian.relation} placeholder="Parentesco (padre, madre, tutor legal)" />
+          <input bind:value={guardian.phone} placeholder="Telefono del tutor" />
+          <input bind:value={guardian.email} placeholder="Email del tutor" />
+          <p><b>Firma manuscrita del tutor</b></p>
+          <canvas class="signature-pad" bind:this={guardianSignatureCanvas} use:guardianSignaturePad width="700" height="180"></canvas>
+          <div class="modal-actions">
+            <button type="button" on:click={clearGuardianSignature}>Limpiar firma tutor</button>
+            <button type="button" on:click={() => (guardianModalOpen = false)}>Guardar datos tutor</button>
+          </div>
+        </div>
+      </section>
+    {/if}
 
     {#if waiverResult}
       <section class="card">
@@ -555,6 +707,31 @@
     background: #d8c6a8;
     color: #13291f;
     font-weight: 700;
+  }
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(18, 30, 23, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 40;
+    padding: 16px;
+  }
+  .modal-card {
+    width: min(760px, 100%);
+    background: #fffaf3;
+    border-radius: 10px;
+    border: 1px solid #e3d7c4;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+    padding: 16px;
+    display: grid;
+    gap: 10px;
+  }
+  .modal-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
   }
   .ok { color: #1a7f45; font-weight: 700; }
   .bad { color: #b42318; font-weight: 700; }
