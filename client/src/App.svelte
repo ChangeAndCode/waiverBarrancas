@@ -186,6 +186,33 @@
     guardianSignatureHasStroke = false;
   }
 
+  function resetRegistrationFlow() {
+    waiverResult = null;
+    message = "";
+    form = {
+      fullName: "",
+      birthDate: "",
+      phone: "",
+      email: "",
+      emergencyContactName: "",
+      emergencyContactPhone: "",
+      hasMedicalCondition: false,
+      consumedAlcoholOrDrugs: false,
+      acceptsSafetyRules: true,
+      acceptedText: false
+    };
+    guardian = {
+      fullName: "",
+      relation: "",
+      phone: "",
+      email: ""
+    };
+    guardianModalOpen = false;
+    clearSignature();
+    clearGuardianSignature();
+    window.location.reload();
+  }
+
   function hasRequiredParticipantFields() {
     return (
       !!selectedAttractionId &&
@@ -534,18 +561,24 @@
     <section class="card">
       <h2>Registro de Waiver</h2>
       {#if message}<p class="bad">{message}</p>{/if}
-      <label for="atraccion">Atraccion</label>
+      <label class="field-label" for="atraccion">Atracción</label>
       <select id="atraccion" bind:value={selectedAttractionId} on:change={() => (selectedAttraction = attractions.find((a) => a._id === selectedAttractionId))}>
         {#each attractions as a}
           <option value={a._id}>{a.name}</option>
         {/each}
       </select>
-      <input bind:value={form.fullName} placeholder="Nombre completo" />
-      <input type="date" bind:value={form.birthDate} />
-      <input bind:value={form.phone} placeholder="Telefono" />
-      <input bind:value={form.email} placeholder="Email" />
-      <input bind:value={form.emergencyContactName} placeholder="Nombre de contacto de emergencia" />
-      <input bind:value={form.emergencyContactPhone} placeholder="Telefono de contacto de emergencia" />
+      <label class="field-label" for="fullName">Nombre completo</label>
+      <input id="fullName" bind:value={form.fullName} autocomplete="name" />
+      <label class="field-label" for="birthDate">Fecha de nacimiento</label>
+      <input id="birthDate" type="date" bind:value={form.birthDate} />
+      <label class="field-label" for="phone">Teléfono</label>
+      <input id="phone" bind:value={form.phone} type="tel" autocomplete="tel" inputmode="tel" />
+      <label class="field-label" for="email">Correo electrónico</label>
+      <input id="email" bind:value={form.email} type="email" autocomplete="email" inputmode="email" />
+      <label class="field-label" for="emergencyName">Nombre del contacto de emergencia</label>
+      <input id="emergencyName" bind:value={form.emergencyContactName} autocomplete="name" />
+      <label class="field-label" for="emergencyPhone">Teléfono del contacto de emergencia</label>
+      <input id="emergencyPhone" bind:value={form.emergencyContactPhone} type="tel" autocomplete="tel" inputmode="tel" />
       {#if isMinor}
         <p class="bad">Participante menor de edad: se requiere tutor y firma manuscrita del tutor.</p>
         <button type="button" on:click={() => (guardianModalOpen = true)}>
@@ -570,10 +603,14 @@
       <section class="modal-backdrop">
         <div class="modal-card">
           <h3>Datos de tutor o padre/madre</h3>
-          <input bind:value={guardian.fullName} placeholder="Nombre completo del tutor" />
-          <input bind:value={guardian.relation} placeholder="Parentesco (padre, madre, tutor legal)" />
-          <input bind:value={guardian.phone} placeholder="Telefono del tutor" />
-          <input bind:value={guardian.email} placeholder="Email del tutor" />
+          <label class="field-label" for="guardianName">Nombre completo del tutor</label>
+          <input id="guardianName" bind:value={guardian.fullName} autocomplete="name" />
+          <label class="field-label" for="guardianRelation">Parentesco</label>
+          <input id="guardianRelation" bind:value={guardian.relation} placeholder="Ej. padre, madre, tutor legal" />
+          <label class="field-label" for="guardianPhone">Teléfono del tutor</label>
+          <input id="guardianPhone" bind:value={guardian.phone} type="tel" autocomplete="tel" />
+          <label class="field-label" for="guardianEmail">Correo electrónico del tutor</label>
+          <input id="guardianEmail" bind:value={guardian.email} type="email" autocomplete="email" />
           <p><b>Firma manuscrita del tutor</b></p>
           <canvas class="signature-pad" bind:this={guardianSignatureCanvas} use:guardianSignaturePad width="700" height="180"></canvas>
           <div class="modal-actions">
@@ -585,12 +622,18 @@
     {/if}
 
     {#if waiverResult}
-      <section class="card">
-        <h2>Waiver firmado</h2>
-        <p><b>Folio:</b> {waiverResult.waiverId}</p>
-        <p><b>Firmado:</b> {new Date(waiverResult.signedAt).toLocaleString()}</p>
-        <p><b>URL validacion:</b> <a href={waiverResult.qrUrl} target="_blank">{waiverResult.qrUrl}</a></p>
-        <canvas bind:this={qrCanvas}></canvas>
+      <section class="modal-backdrop">
+        <div class="modal-card">
+          <h2>Waiver firmado</h2>
+          <p><b>Folio:</b> {waiverResult.waiverId}</p>
+          <p><b>Firmado:</b> {new Date(waiverResult.signedAt).toLocaleString()}</p>
+          <p><b>Codigo QR de validacion</b></p>
+          <canvas bind:this={qrCanvas}></canvas>
+          <p class="modal-help">
+            Muestra este QR al staff para validar tu acceso a la atraccion.
+          </p>
+          <button type="button" on:click={resetRegistrationFlow}>Aceptar</button>
+        </div>
       </section>
     {/if}
   {/if}
@@ -646,6 +689,11 @@
   }
   input, select, textarea {
     background: #fff;
+  }
+  .field-label {
+    font-weight: 600;
+    color: #1f4a3b;
+    margin-top: 4px;
   }
   button {
     cursor: pointer;
@@ -736,6 +784,10 @@
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
+  }
+  .modal-help {
+    margin: 0;
+    color: #2a4034;
   }
   .ok { color: #1a7f45; font-weight: 700; }
   .bad { color: #b42318; font-weight: 700; }
