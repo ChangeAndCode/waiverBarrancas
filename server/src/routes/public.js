@@ -57,7 +57,8 @@ export function publicRoutes({ jwtSecret }) {
       participant.birthDate &&
       participant.phone &&
       participant.email &&
-      participant.emergencyContact;
+      participant.emergencyContactName &&
+      participant.emergencyContactPhone;
     if (!requiredParticipant) {
       return res.status(400).json({ error: "Todos los campos del participante son obligatorios." });
     }

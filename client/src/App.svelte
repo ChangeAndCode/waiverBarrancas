@@ -36,7 +36,8 @@
     birthDate: "",
     phone: "",
     email: "",
-    emergencyContact: "",
+    emergencyContactName: "",
+    emergencyContactPhone: "",
     hasMedicalCondition: false,
     consumedAlcoholOrDrugs: false,
     acceptsSafetyRules: true,
@@ -192,7 +193,8 @@
       !!form.birthDate &&
       !!form.phone.trim() &&
       !!form.email.trim() &&
-      !!form.emergencyContact.trim() &&
+      !!form.emergencyContactName.trim() &&
+      !!form.emergencyContactPhone.trim() &&
       form.acceptedText === true &&
       form.acceptsSafetyRules === true
     );
@@ -270,7 +272,8 @@
           birthDate: form.birthDate,
           phone: form.phone,
           email: form.email,
-          emergencyContact: form.emergencyContact
+          emergencyContactName: form.emergencyContactName,
+          emergencyContactPhone: form.emergencyContactPhone
         },
         answers: {
           hasMedicalCondition: form.hasMedicalCondition,
@@ -541,7 +544,8 @@
       <input type="date" bind:value={form.birthDate} />
       <input bind:value={form.phone} placeholder="Telefono" />
       <input bind:value={form.email} placeholder="Email" />
-      <input bind:value={form.emergencyContact} placeholder="Contacto de emergencia" />
+      <input bind:value={form.emergencyContactName} placeholder="Nombre de contacto de emergencia" />
+      <input bind:value={form.emergencyContactPhone} placeholder="Telefono de contacto de emergencia" />
       {#if isMinor}
         <p class="bad">Participante menor de edad: se requiere tutor y firma manuscrita del tutor.</p>
         <button type="button" on:click={() => (guardianModalOpen = true)}>

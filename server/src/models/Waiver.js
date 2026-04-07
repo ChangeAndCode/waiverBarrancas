@@ -9,7 +9,8 @@ const waiverSchema = new mongoose.Schema(
       birthDate: { type: String, required: true, trim: true },
       phone: { type: String, required: true, trim: true },
       email: { type: String, required: true, trim: true },
-      emergencyContact: { type: String, required: true, trim: true }
+      emergencyContactName: { type: String, required: true, trim: true },
+      emergencyContactPhone: { type: String, required: true, trim: true }
     },
     isMinor: { type: Boolean, default: false },
     guardian: {
