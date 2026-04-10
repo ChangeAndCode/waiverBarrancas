@@ -3,6 +3,7 @@ import { Attraction } from "../models/Attraction.js";
 import { Waiver } from "../models/Waiver.js";
 import { signWaiverToken, verifyWaiverToken } from "../lib/token.js";
 import { renderWaiverTextForSignature } from "../lib/waiverText.js";
+import { sendWaiverQrEmail } from "../lib/email.js";
 
 function baseUrlFromRequest(req) {
   if (process.env.PUBLIC_BASE_URL) return process.env.PUBLIC_BASE_URL;
@@ -103,11 +104,29 @@ export function publicRoutes({ jwtSecret }) {
 
     const token = signWaiverToken(waiver._id.toString(), jwtSecret);
     const qrUrl = `${baseUrlFromRequest(req)}/check/${token}`;
+    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=420x420&data=${encodeURIComponent(qrUrl)}`;
+    let emailSent = false;
+
+    try {
+      const result = await sendWaiverQrEmail({
+        to: participant.email,
+        participantName: participant.fullName,
+        attractionName: attraction.name,
+        waiverId: waiver._id.toString(),
+        signedAt,
+        qrUrl,
+        qrImageUrl
+      });
+      emailSent = Boolean(result?.sent);
+    } catch (error) {
+      console.error("No se pudo enviar correo con Resend:", error.message);
+    }
 
     res.status(201).json({
       waiverId: waiver._id,
       token,
       qrUrl,
+      emailSent,
       signedAt: waiver.createdAt
     });
   });

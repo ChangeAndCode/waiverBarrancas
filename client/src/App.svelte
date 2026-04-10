@@ -26,6 +26,9 @@
   let adminAttractions = [];
   let adminUsers = [];
   let report = { summary: null, byAttraction: [], waivers: [] };
+  let adminAttractionEditId = "";
+  let editWaiverText = "";
+  let editAttractionDescription = "";
   let newUser = { name: "", email: "", password: "", role: "staff" };
   let newAttraction = { name: "", code: "", description: "", waiverText: "", active: true };
   let showAdminLogin = false;
@@ -400,6 +403,33 @@
     await loadAdminData();
   }
 
+  function startEditAttraction(item) {
+    adminAttractionEditId = item._id;
+    editWaiverText = item.waiverText || "";
+    editAttractionDescription = item.description || "";
+  }
+
+  function cancelEditAttraction() {
+    adminAttractionEditId = "";
+    editWaiverText = "";
+    editAttractionDescription = "";
+  }
+
+  async function saveAttractionText(item) {
+    message = "";
+    try {
+      await api(`/admin/attractions/${item._id}`, "PATCH", {
+        waiverText: editWaiverText,
+        description: editAttractionDescription
+      });
+      await loadAdminData();
+      cancelEditAttraction();
+      message = "Texto de carta actualizado.";
+    } catch (e) {
+      message = e.message;
+    }
+  }
+
   async function createUser() {
     message = "";
     try {
@@ -504,6 +534,9 @@
           <button class:tab-active={adminTab === "report"} on:click={() => (adminTab = "report")}>
             Reporte basico
           </button>
+          <button class:tab-active={adminTab === "db-report"} on:click={() => (adminTab = "db-report")}>
+            Reporte base de datos
+          </button>
         </div>
 
         {#if adminTab === "new-attraction"}
@@ -520,10 +553,25 @@
           {#each adminAttractions as item}
             <div class="item">
               <p><b>{item.name}</b> ({item.code}) - {item.active ? "Activa" : "Inactiva"}</p>
-              <button on:click={() => toggleAttraction(item)}>
-                {item.active ? "Desactivar" : "Activar"}
-              </button>
+              <div class="inline-actions">
+                <button on:click={() => startEditAttraction(item)}>Editar texto</button>
+                <button on:click={() => toggleAttraction(item)}>
+                  {item.active ? "Desactivar" : "Activar"}
+                </button>
+              </div>
             </div>
+            {#if adminAttractionEditId === item._id}
+              <div class="card edit-card">
+                <label class="field-label" for="editDescription">Descripcion</label>
+                <input id="editDescription" bind:value={editAttractionDescription} />
+                <label class="field-label" for="editWaiverText">Carta responsiva</label>
+                <textarea id="editWaiverText" bind:value={editWaiverText} rows="10"></textarea>
+                <div class="inline-actions">
+                  <button type="button" on:click={() => saveAttractionText(item)}>Guardar cambios</button>
+                  <button type="button" on:click={cancelEditAttraction}>Cancelar</button>
+                </div>
+              </div>
+            {/if}
           {/each}
         {/if}
 
@@ -555,6 +603,19 @@
             <p>No hay datos de reporte.</p>
           {/if}
         {/if}
+        {#if adminTab === "db-report"}
+          <h3>Reporte base de datos</h3>
+          {#if report.waivers.length === 0}
+            <p>No hay registros.</p>
+          {:else}
+            {#each report.waivers as item}
+              <div class="item">
+                <p>{item.fullName} - {item.email} - {item.attractionName}</p>
+                <p>{new Date(item.createdAt).toLocaleString()} - {item.status}</p>
+              </div>
+            {/each}
+          {/if}
+        {/if}
       {/if}
     </section>
   {:else}
@@ -567,7 +628,7 @@
           <option value={a._id}>{a.name}</option>
         {/each}
       </select>
-      <label class="field-label" for="fullName">Nombre completo</label>
+      <label class="field-label" for="fullName">Nombre completo (como en tu INE)</label>
       <input id="fullName" bind:value={form.fullName} autocomplete="name" />
       <label class="field-label" for="birthDate">Fecha de nacimiento</label>
       <input id="birthDate" type="date" bind:value={form.birthDate} />
@@ -632,6 +693,9 @@
           <p class="modal-help">
             Muestra este QR al staff para validar tu acceso a la atraccion.
           </p>
+          {#if waiverResult.emailSent}
+            <p class="ok">Tambien enviamos este QR al correo registrado.</p>
+          {/if}
           <button type="button" on:click={resetRegistrationFlow}>Aceptar</button>
         </div>
       </section>
@@ -737,6 +801,14 @@
     align-items: center;
     border-bottom: 1px solid #ebdfcc;
     padding: 8px 0;
+  }
+  .inline-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .edit-card {
+    margin-top: 6px;
   }
   .tabs {
     display: flex;

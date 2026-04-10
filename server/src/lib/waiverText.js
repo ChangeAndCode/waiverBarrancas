@@ -12,8 +12,17 @@ function formatMxDateTime(date) {
   return `${datePart}, ${timePart} h`;
 }
 
+function normalizeWaiverTextLayout(text) {
+  return String(text || "")
+    .replace(/\r\n/g, "\n")
+    .split("\n\n")
+    .map((paragraph) => paragraph.replace(/\n+/g, " ").replace(/\s{2,}/g, " ").trim())
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 export function renderWaiverTextForSignature(text, signedAt = new Date()) {
-  return String(text || "").replaceAll("{{SIGN_DATE}}", formatMxDateTime(signedAt));
+  return normalizeWaiverTextLayout(text).replaceAll("{{SIGN_DATE}}", formatMxDateTime(signedAt));
 }
 
 export const defaultWaiverTextMx2026 = `
