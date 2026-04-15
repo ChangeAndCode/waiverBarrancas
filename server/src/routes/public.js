@@ -105,6 +105,7 @@ export function publicRoutes({ jwtSecret }) {
     const token = signWaiverToken(waiver._id.toString(), jwtSecret);
     const qrUrl = `${baseUrlFromRequest(req)}/check/${token}`;
     const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=420x420&data=${encodeURIComponent(qrUrl)}`;
+    const logoUrl = `${baseUrlFromRequest(req)}/branding/logobarrancas.png`;
     let emailSent = false;
 
     try {
@@ -115,7 +116,8 @@ export function publicRoutes({ jwtSecret }) {
         waiverId: waiver._id.toString(),
         signedAt,
         qrUrl,
-        qrImageUrl
+        qrImageUrl,
+        logoUrl
       });
       emailSent = Boolean(result?.sent);
     } catch (error) {

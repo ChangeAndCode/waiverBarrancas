@@ -5,6 +5,65 @@ import { Waiver } from "../models/Waiver.js";
 import { User } from "../models/User.js";
 import { requireAuth, requireRoles } from "../lib/auth.js";
 
+const MAX_CSV_ROWS = 50000;
+const waiverSelectLean =
+  "-signatureImage -guardian.signatureImage -waiverTextSnapshot";
+
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function waiverAdminReportFilter(req) {
+  const query = {};
+  if (req.query.attractionId) query.attractionId = req.query.attractionId;
+  const st = String(req.query.status || "").trim();
+  if (st === "signed" || st === "revoked") query.status = st;
+  if (req.query.from || req.query.to) {
+    query.createdAt = {};
+    if (req.query.from) query.createdAt.$gte = new Date(req.query.from);
+    if (req.query.to) query.createdAt.$lte = new Date(req.query.to);
+  }
+  const q = String(req.query.q || "").trim();
+  if (q) {
+    const safe = escapeRegex(q);
+    query.$or = [
+      { "participant.fullName": { $regex: safe, $options: "i" } },
+      { "participant.email": { $regex: safe, $options: "i" } }
+    ];
+  }
+  return query;
+}
+
+function csvCell(v) {
+  const s = v == null ? "" : String(v);
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function mapWaiverRow(w) {
+  return {
+    id: w._id,
+    attractionId: w.attractionId,
+    attractionName: w.attractionName,
+    fullName: w.participant?.fullName,
+    email: w.participant?.email,
+    phone: w.participant?.phone,
+    birthDate: w.participant?.birthDate,
+    emergencyContactName: w.participant?.emergencyContactName,
+    emergencyContactPhone: w.participant?.emergencyContactPhone,
+    isMinor: w.isMinor,
+    guardianFullName: w.guardian?.fullName || "",
+    guardianRelation: w.guardian?.relation || "",
+    guardianPhone: w.guardian?.phone || "",
+    guardianEmail: w.guardian?.email || "",
+    hasMedicalCondition: w.answers?.hasMedicalCondition,
+    consumedAlcoholOrDrugs: w.answers?.consumedAlcoholOrDrugs,
+    acceptsSafetyRules: w.answers?.acceptsSafetyRules,
+    status: w.status,
+    createdAt: w.createdAt
+  };
+}
+
 export function adminRoutes({ jwtSecret }) {
   const router = Router();
 
@@ -52,6 +111,104 @@ export function adminRoutes({ jwtSecret }) {
     ).lean();
     if (!updated) return res.status(404).json({ error: "Waiver no encontrado." });
     res.json(updated);
+  });
+
+  router.get("/reports/waivers", async (req, res) => {
+    const filter = waiverAdminReportFilter(req);
+    const page = Math.max(1, parseInt(String(req.query.page || "1"), 10) || 1);
+    const pageSizeRaw = parseInt(String(req.query.pageSize || "25"), 10) || 25;
+    const pageSize = Math.min(200, Math.max(1, pageSizeRaw));
+
+    const total = await Waiver.countDocuments(filter);
+    let signedCount = 0;
+    let revokedCount = 0;
+    if (filter.status) {
+      signedCount = filter.status === "signed" ? total : 0;
+      revokedCount = filter.status === "revoked" ? total : 0;
+    } else {
+      [signedCount, revokedCount] = await Promise.all([
+        Waiver.countDocuments({ ...filter, status: "signed" }),
+        Waiver.countDocuments({ ...filter, status: "revoked" })
+      ]);
+    }
+
+    const raw = await Waiver.find(filter)
+      .select(waiverSelectLean)
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * pageSize)
+      .limit(pageSize)
+      .lean();
+
+    res.json({
+      summary: { total, signed: signedCount, revoked: revokedCount },
+      page,
+      pageSize,
+      total,
+      items: raw.map(mapWaiverRow)
+    });
+  });
+
+  router.get("/reports/waivers/export.csv", async (req, res) => {
+    const filter = waiverAdminReportFilter(req);
+    const rows = await Waiver.find(filter)
+      .select(waiverSelectLean)
+      .sort({ createdAt: -1 })
+      .limit(MAX_CSV_ROWS)
+      .lean();
+
+    const headers = [
+      "id",
+      "attractionId",
+      "attractionName",
+      "fullName",
+      "email",
+      "phone",
+      "birthDate",
+      "emergencyContactName",
+      "emergencyContactPhone",
+      "isMinor",
+      "guardianFullName",
+      "guardianRelation",
+      "guardianPhone",
+      "guardianEmail",
+      "hasMedicalCondition",
+      "consumedAlcoholOrDrugs",
+      "acceptsSafetyRules",
+      "status",
+      "createdAt"
+    ];
+    const lines = [headers.join(",")];
+    for (const w of rows) {
+      const r = mapWaiverRow(w);
+      lines.push(
+        [
+          csvCell(r.id),
+          csvCell(r.attractionId),
+          csvCell(r.attractionName),
+          csvCell(r.fullName),
+          csvCell(r.email),
+          csvCell(r.phone),
+          csvCell(r.birthDate),
+          csvCell(r.emergencyContactName),
+          csvCell(r.emergencyContactPhone),
+          csvCell(r.isMinor),
+          csvCell(r.guardianFullName),
+          csvCell(r.guardianRelation),
+          csvCell(r.guardianPhone),
+          csvCell(r.guardianEmail),
+          csvCell(r.hasMedicalCondition),
+          csvCell(r.consumedAlcoholOrDrugs),
+          csvCell(r.acceptsSafetyRules),
+          csvCell(r.status),
+          csvCell(r.createdAt ? new Date(r.createdAt).toISOString() : "")
+        ].join(",")
+      );
+    }
+
+    const body = `\uFEFF${lines.join("\n")}`;
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", 'attachment; filename="waivers-reporte.csv"');
+    res.send(body);
   });
 
   router.get("/users", async (_req, res) => {

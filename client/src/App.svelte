@@ -1,5 +1,6 @@
 <script>
   import QRCode from "qrcode";
+  import logoBarrancas from "../logobarrancas.png";
 
   const API_BASE = "/api";
   let path = window.location.pathname;
@@ -26,6 +27,8 @@
   let adminAttractions = [];
   let adminUsers = [];
   let report = { summary: null, byAttraction: [], waivers: [] };
+  let adminReport = { items: [], total: 0, page: 1, pageSize: 25, summary: null };
+  let adminReportFilters = { attractionId: "", from: "", to: "", status: "", q: "" };
   let adminAttractionEditId = "";
   let editWaiverText = "";
   let editAttractionDescription = "";
@@ -380,6 +383,88 @@
     report = await api("/reports/waivers");
   }
 
+  function adminReportQueryString(includePagination) {
+    const p = new URLSearchParams();
+    if (adminReportFilters.attractionId) p.set("attractionId", adminReportFilters.attractionId);
+    if (adminReportFilters.from) p.set("from", adminReportFilters.from);
+    if (adminReportFilters.to) p.set("to", adminReportFilters.to);
+    if (adminReportFilters.status) p.set("status", adminReportFilters.status);
+    const qv = adminReportFilters.q.trim();
+    if (qv) p.set("q", qv);
+    if (includePagination) {
+      p.set("page", String(adminReport.page));
+      p.set("pageSize", String(Number(adminReport.pageSize) || 25));
+    }
+    return p.toString();
+  }
+
+  async function loadAdminReport() {
+    loading = true;
+    message = "";
+    try {
+      const qs = adminReportQueryString(true);
+      const data = await api(`/admin/reports/waivers?${qs}`);
+      adminReport = {
+        items: data.items || [],
+        total: data.total ?? 0,
+        page: data.page ?? 1,
+        pageSize: data.pageSize ?? 25,
+        summary: data.summary ?? null
+      };
+    } catch (e) {
+      message = e.message;
+    } finally {
+      loading = false;
+    }
+  }
+
+  function applyAdminReportFilters() {
+    adminReport = { ...adminReport, page: 1 };
+    loadAdminReport();
+  }
+
+  function adminReportPrevPage() {
+    if (adminReport.page <= 1) return;
+    adminReport = { ...adminReport, page: adminReport.page - 1 };
+    loadAdminReport();
+  }
+
+  function adminReportNextPage() {
+    const pages = Math.max(1, Math.ceil(adminReport.total / adminReport.pageSize));
+    if (adminReport.page >= pages) return;
+    adminReport = { ...adminReport, page: adminReport.page + 1 };
+    loadAdminReport();
+  }
+
+  async function downloadAdminReportCsv() {
+    message = "";
+    try {
+      const qs = adminReportQueryString(false);
+      const r = await fetch(`${API_BASE}/admin/reports/waivers/export.csv?${qs}`, {
+        headers: { ...authHeaders() }
+      });
+      if (!r.ok) {
+        let err = "Error al descargar CSV.";
+        try {
+          const j = await r.json();
+          if (j.error) err = j.error;
+        } catch {
+          /* ignore */
+        }
+        throw new Error(err);
+      }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `waivers-reporte-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      message = e.message;
+    }
+  }
+
   async function loadAdminData() {
     adminAttractions = await api("/admin/attractions");
     adminUsers = await api("/admin/users");
@@ -467,7 +552,10 @@
 
 <main>
   <header>
-    <h1>Waiver Digital - Parque Tematico</h1>
+    <div class="brand">
+      <img src={logoBarrancas} alt="Parque Barrancas" class="brand-logo" />
+      <h1>Waiver Digital - Parque Tematico</h1>
+    </div>
     <nav>
       {#if path === "/admin"}
         <span class="admin-pill">Modo Admin</span>
@@ -534,7 +622,14 @@
           <button class:tab-active={adminTab === "report"} on:click={() => (adminTab = "report")}>
             Reporte basico
           </button>
-          <button class:tab-active={adminTab === "db-report"} on:click={() => (adminTab = "db-report")}>
+          <button
+            class:tab-active={adminTab === "db-report"}
+            on:click={() => {
+              adminTab = "db-report";
+              adminReport = { ...adminReport, page: 1 };
+              loadAdminReport();
+            }}
+          >
             Reporte base de datos
           </button>
         </div>
@@ -605,16 +700,104 @@
         {/if}
         {#if adminTab === "db-report"}
           <h3>Reporte base de datos</h3>
-          {#if report.waivers.length === 0}
-            <p>No hay registros.</p>
-          {:else}
-            {#each report.waivers as item}
-              <div class="item">
-                <p>{item.fullName} - {item.email} - {item.attractionName}</p>
-                <p>{new Date(item.createdAt).toLocaleString()} - {item.status}</p>
-              </div>
-            {/each}
+          <p class="muted">
+            Filtros aplican a la tabla y al CSV. El archivo incluye hasta 50 mil filas con los mismos filtros (sin imagenes de firma).
+          </p>
+          <div class="filter-row">
+            <label class="field-label" for="repAttr">Atraccion</label>
+            <select id="repAttr" bind:value={adminReportFilters.attractionId}>
+              <option value="">Todas</option>
+              {#each adminAttractions as a}
+                <option value={a._id}>{a.name}</option>
+              {/each}
+            </select>
+            <label class="field-label" for="repFrom">Desde</label>
+            <input id="repFrom" type="date" bind:value={adminReportFilters.from} />
+            <label class="field-label" for="repTo">Hasta</label>
+            <input id="repTo" type="date" bind:value={adminReportFilters.to} />
+            <label class="field-label" for="repSt">Estado</label>
+            <select id="repSt" bind:value={adminReportFilters.status}>
+              <option value="">Todos</option>
+              <option value="signed">Firmado</option>
+              <option value="revoked">Revocado</option>
+            </select>
+            <label class="field-label" for="repQ">Buscar</label>
+            <input id="repQ" bind:value={adminReportFilters.q} placeholder="Nombre o correo" />
+            <div class="inline-actions filter-actions">
+              <button type="button" on:click={applyAdminReportFilters} disabled={loading}>Aplicar</button>
+              <button type="button" on:click={downloadAdminReportCsv} disabled={loading}>Descargar CSV</button>
+            </div>
+          </div>
+          {#if adminReport.summary}
+            <p>
+              <b>Coincidencias:</b> {adminReport.summary.total} |
+              <b>Firmados:</b> {adminReport.summary.signed} |
+              <b>Revocados:</b> {adminReport.summary.revoked}
+            </p>
           {/if}
+          <div class="table-wrap">
+            <table class="report-table">
+              <thead>
+                <tr>
+                  <th>Folio</th>
+                  <th>Atraccion</th>
+                  <th>Nombre</th>
+                  <th>Correo</th>
+                  <th>Telefono</th>
+                  <th>Nacimiento</th>
+                  <th>Estado</th>
+                  <th>Fecha registro</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each adminReport.items as row}
+                  <tr>
+                    <td>{row.id}</td>
+                    <td>{row.attractionName}</td>
+                    <td>{row.fullName}</td>
+                    <td>{row.email}</td>
+                    <td>{row.phone}</td>
+                    <td>{row.birthDate}</td>
+                    <td>{row.status}</td>
+                    <td>{new Date(row.createdAt).toLocaleString()}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+          {#if adminReport.items.length === 0 && !loading}
+            <p>No hay registros con estos filtros.</p>
+          {/if}
+          <div class="inline-actions pager">
+            <button type="button" disabled={loading || adminReport.page <= 1} on:click={adminReportPrevPage}>
+              Anterior
+            </button>
+            <span class="pager-info">
+              Pagina {adminReport.page} de {Math.max(1, Math.ceil(adminReport.total / adminReport.pageSize))}
+              ({adminReport.total} total)
+            </span>
+            <button
+              type="button"
+              disabled={loading || adminReport.page >= Math.max(1, Math.ceil(adminReport.total / adminReport.pageSize))}
+              on:click={adminReportNextPage}
+            >
+              Siguiente
+            </button>
+            <label class="field-label inline-label" for="repPs">Por pagina</label>
+            <select
+              id="repPs"
+              bind:value={adminReport.pageSize}
+              on:change={() => {
+                adminReport = { ...adminReport, page: 1 };
+                loadAdminReport();
+              }}
+            >
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+              <option value={200}>200</option>
+            </select>
+          </div>
         {/if}
       {/if}
     </section>
@@ -729,6 +912,21 @@
     color: #f8f3e9;
     box-shadow: 0 8px 20px rgba(22, 43, 34, 0.15);
   }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+  .brand-logo {
+    width: 42px;
+    height: 42px;
+    object-fit: contain;
+    flex: 0 0 auto;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    padding: 3px;
+  }
   h1 { font-size: 20px; margin: 0; }
   nav {
     display: flex;
@@ -809,6 +1007,54 @@
   }
   .edit-card {
     margin-top: 6px;
+  }
+  .muted {
+    margin: 0;
+    color: #4a5c52;
+    font-size: 13px;
+  }
+  .filter-row {
+    display: grid;
+    gap: 8px;
+    align-items: end;
+  }
+  .filter-actions {
+    margin-top: 4px;
+  }
+  .table-wrap {
+    overflow-x: auto;
+    border: 1px solid #e3d7c4;
+    border-radius: 8px;
+    background: #fff;
+  }
+  .report-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    min-width: 720px;
+  }
+  .report-table th,
+  .report-table td {
+    border-bottom: 1px solid #ebdfcc;
+    padding: 8px;
+    text-align: left;
+    vertical-align: top;
+  }
+  .report-table th {
+    background: #f0e6d4;
+    color: #1f4a3b;
+    font-weight: 700;
+  }
+  .pager {
+    align-items: center;
+    margin-top: 8px;
+  }
+  .pager-info {
+    font-size: 13px;
+    color: #2a4034;
+  }
+  .inline-label {
+    margin: 0;
   }
   .tabs {
     display: flex;
