@@ -60,6 +60,7 @@ function mapWaiverRow(w) {
     consumedAlcoholOrDrugs: w.answers?.consumedAlcoholOrDrugs,
     acceptsSafetyRules: w.answers?.acceptsSafetyRules,
     status: w.status,
+    qrConsumedAt: w.qrConsumedAt || null,
     createdAt: w.createdAt
   };
 }
@@ -76,7 +77,7 @@ export function adminRoutes({ jwtSecret }) {
 
   router.post("/attractions", async (req, res) => {
     const { name, code, description, waiverText, active = true } = req.body ?? {};
-    if (!name || !code) return res.status(400).json({ error: "name y code son requeridos." });
+    if (!name || !code) return res.status(400).json({ error: "Nombre y código son obligatorios." });
 
     const created = await Attraction.create({
       name,
@@ -92,7 +93,7 @@ export function adminRoutes({ jwtSecret }) {
     const payload = { ...req.body };
     if (payload.code) payload.code = String(payload.code).toUpperCase();
     const updated = await Attraction.findByIdAndUpdate(req.params.id, payload, { new: true }).lean();
-    if (!updated) return res.status(404).json({ error: "Atraccion no encontrada." });
+    if (!updated) return res.status(404).json({ error: "Atracción no encontrada." });
     res.json(updated);
   });
 
@@ -175,6 +176,7 @@ export function adminRoutes({ jwtSecret }) {
       "consumedAlcoholOrDrugs",
       "acceptsSafetyRules",
       "status",
+      "qrConsumedAt",
       "createdAt"
     ];
     const lines = [headers.join(",")];
@@ -200,6 +202,7 @@ export function adminRoutes({ jwtSecret }) {
           csvCell(r.consumedAlcoholOrDrugs),
           csvCell(r.acceptsSafetyRules),
           csvCell(r.status),
+          csvCell(r.qrConsumedAt ? new Date(r.qrConsumedAt).toISOString() : ""),
           csvCell(r.createdAt ? new Date(r.createdAt).toISOString() : "")
         ].join(",")
       );
@@ -223,11 +226,11 @@ export function adminRoutes({ jwtSecret }) {
     const role = req.body?.role;
 
     if (!name || !email || !password || !["admin", "staff"].includes(role)) {
-      return res.status(400).json({ error: "Datos de usuario invalidos." });
+      return res.status(400).json({ error: "Datos de usuario inválidos." });
     }
 
     const exists = await User.findOne({ email });
-    if (exists) return res.status(409).json({ error: "Email ya registrado." });
+    if (exists) return res.status(409).json({ error: "Ese correo ya está registrado." });
 
     const passwordHash = await bcrypt.hash(password, 10);
     const created = await User.create({ name, email, passwordHash, role, active: true });

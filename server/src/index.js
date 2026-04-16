@@ -96,7 +96,7 @@ if (!hasAttractions) {
   await Attraction.create({
     name: "Tirolesa Gigante - Barrancas del Cobre",
     code: "TIROLESA-001",
-    description: "Atraccion principal de aventura.",
+    description: "Atracción principal de aventura.",
     waiverText: defaultWaiverTextMx2026,
     active: true
   });

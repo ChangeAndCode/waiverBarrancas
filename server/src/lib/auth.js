@@ -22,7 +22,7 @@ export function requireAuth(jwtSecret) {
       req.auth = jwt.verify(token, jwtSecret);
       return next();
     } catch (_error) {
-      return res.status(401).json({ error: "Token invalido." });
+      return res.status(401).json({ error: "Token inválido." });
     }
   };
 }

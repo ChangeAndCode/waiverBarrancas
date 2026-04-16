@@ -477,7 +477,7 @@
       await api("/admin/attractions", "POST", newAttraction);
       newAttraction = { name: "", code: "", description: "", waiverText: "", active: true };
       await loadAdminData();
-      message = "Atraccion creada.";
+      message = "Atracción creada.";
     } catch (e) {
       message = e.message;
     }
@@ -509,7 +509,7 @@
       });
       await loadAdminData();
       cancelEditAttraction();
-      message = "Texto de carta actualizado.";
+      message = "Texto de la carta actualizado.";
     } catch (e) {
       message = e.message;
     }
@@ -554,7 +554,7 @@
   <header>
     <div class="brand">
       <img src={logoBarrancas} alt="Parque Barrancas" class="brand-logo" />
-      <h1>Waiver Digital - Parque Tematico</h1>
+      <h1>Waiver Digital - Parque Temático</h1>
     </div>
     <nav>
       {#if path === "/admin"}
@@ -570,15 +570,26 @@
 
   {#if path.startsWith("/check/")}
     <section class="card">
-      <h2>Validacion de QR (staff)</h2>
+      <h2>Validación de QR (staff)</h2>
       {#if checkData?.valid}
-        <p class="ok">VALIDO</p>
+        <p class="ok">VÁLIDO</p>
         <p><b>Nombre:</b> {checkData.waiver.fullName}</p>
-        <p><b>Atraccion:</b> {checkData.waiver.attractionName}</p>
-        <p><b>Fecha firma:</b> {new Date(checkData.waiver.signedAt).toLocaleString()}</p>
+        <p><b>Atracción:</b> {checkData.waiver.attractionName}</p>
+        <p><b>Fecha de firma:</b> {new Date(checkData.waiver.signedAt).toLocaleString()}</p>
         <p><b>Folio:</b> {checkData.waiver.id}</p>
+        <p class="muted">Este QR queda inhabilitado; la próxima lectura mostrará expirado.</p>
+      {:else if checkData?.reason === "qr_already_used"}
+        <p class="bad">EXPIRADO</p>
+        <p class="muted">
+          Este código ya fue validado. Para volver a subirse el participante debe firmar un waiver nuevo.
+        </p>
+        <p><b>Atracción en la que se validó:</b> {checkData.attractionName}</p>
+        <p><b>Validado el:</b> {new Date(checkData.usedAt).toLocaleString("es-MX")}</p>
+        {#if checkData.fullName}
+          <p><b>Nombre:</b> {checkData.fullName}</p>
+        {/if}
       {:else}
-        <p class="bad">INVALIDO</p>
+        <p class="bad">INVÁLIDO</p>
         <p>{message || "No se pudo validar."}</p>
       {/if}
     </section>
@@ -586,11 +597,14 @@
     <section class="card">
       <h2>Panel Staff</h2>
       <p>Usuario: {authUser?.name} ({authUser?.role})</p>
-      <p>Escanea QR y abre la URL para validar. Esta vista muestra reportes basicos.</p>
+      <p>
+        Escanea el QR y abre la URL para validar. Cada QR solo sirve una vez: al validarlo queda usado y el participante
+        debe firmar de nuevo para otra vuelta. Aquí ves reportes básicos.
+      </p>
       {#if report.summary}
         <p><b>Total:</b> {report.summary.total} | <b>Firmados:</b> {report.summary.signed} | <b>Revocados:</b> {report.summary.revoked}</p>
       {/if}
-      <h3>Ultimos registros</h3>
+      <h3>Últimos registros</h3>
       {#each report.waivers as item}
         <div class="item">
           <p>{item.fullName} - {item.attractionName} - {new Date(item.createdAt).toLocaleString()}</p>
@@ -602,16 +616,16 @@
       {#if showAdminLogin}
         <h2>Acceso Admin</h2>
         {#if message}<p class="bad">{message}</p>{/if}
-        <input bind:value={loginForm.email} placeholder="Email" />
-        <input bind:value={loginForm.password} type="password" placeholder="Password" />
-        <button on:click={login} disabled={loading}>{loading ? "Entrando..." : "Iniciar sesion"}</button>
+        <input bind:value={loginForm.email} placeholder="Correo electrónico" />
+        <input bind:value={loginForm.password} type="password" placeholder="Contraseña" />
+        <button on:click={login} disabled={loading}>{loading ? "Entrando..." : "Iniciar sesión"}</button>
       {:else}
         <h2>Administrador</h2>
         {#if message}<p>{message}</p>{/if}
 
         <div class="tabs">
           <button class:tab-active={adminTab === "new-attraction"} on:click={() => (adminTab = "new-attraction")}>
-            Nueva atraccion
+            Nueva atracción
           </button>
           <button class:tab-active={adminTab === "attractions"} on:click={() => (adminTab = "attractions")}>
             Atracciones
@@ -620,7 +634,7 @@
             Usuarios
           </button>
           <button class:tab-active={adminTab === "report"} on:click={() => (adminTab = "report")}>
-            Reporte basico
+            Reporte básico
           </button>
           <button
             class:tab-active={adminTab === "db-report"}
@@ -635,12 +649,12 @@
         </div>
 
         {#if adminTab === "new-attraction"}
-          <h3>Nueva atraccion</h3>
+          <h3>Nueva atracción</h3>
           <input bind:value={newAttraction.name} placeholder="Nombre" />
-          <input bind:value={newAttraction.code} placeholder="Codigo unico" />
-          <input bind:value={newAttraction.description} placeholder="Descripcion corta" />
+          <input bind:value={newAttraction.code} placeholder="Código único" />
+          <input bind:value={newAttraction.description} placeholder="Descripción corta" />
           <textarea bind:value={newAttraction.waiverText} rows="8" placeholder="Texto del waiver (opcional)"></textarea>
-          <button on:click={createAttraction}>Crear atraccion</button>
+          <button on:click={createAttraction}>Crear atracción</button>
         {/if}
 
         {#if adminTab === "attractions"}
@@ -657,7 +671,7 @@
             </div>
             {#if adminAttractionEditId === item._id}
               <div class="card edit-card">
-                <label class="field-label" for="editDescription">Descripcion</label>
+                <label class="field-label" for="editDescription">Descripción</label>
                 <input id="editDescription" bind:value={editAttractionDescription} />
                 <label class="field-label" for="editWaiverText">Carta responsiva</label>
                 <textarea id="editWaiverText" bind:value={editWaiverText} rows="10"></textarea>
@@ -673,8 +687,8 @@
         {#if adminTab === "users"}
           <h3>Crear usuario</h3>
           <input bind:value={newUser.name} placeholder="Nombre" />
-          <input bind:value={newUser.email} placeholder="Email" />
-          <input bind:value={newUser.password} type="password" placeholder="Password" />
+          <input bind:value={newUser.email} placeholder="Correo electrónico" />
+          <input bind:value={newUser.password} type="password" placeholder="Contraseña" />
           <select bind:value={newUser.role}>
             <option value="staff">staff</option>
             <option value="admin">admin</option>
@@ -691,7 +705,7 @@
         {/if}
 
         {#if adminTab === "report"}
-          <h3>Reporte basico</h3>
+          <h3>Reporte básico</h3>
           {#if report.summary}
             <p><b>Total:</b> {report.summary.total} | <b>Firmados:</b> {report.summary.signed} | <b>Revocados:</b> {report.summary.revoked}</p>
           {:else}
@@ -701,10 +715,10 @@
         {#if adminTab === "db-report"}
           <h3>Reporte base de datos</h3>
           <p class="muted">
-            Filtros aplican a la tabla y al CSV. El archivo incluye hasta 50 mil filas con los mismos filtros (sin imagenes de firma).
+            Filtros aplican a la tabla y al CSV. El archivo incluye hasta 50 mil filas con los mismos filtros (sin imágenes de firma).
           </p>
           <div class="filter-row">
-            <label class="field-label" for="repAttr">Atraccion</label>
+            <label class="field-label" for="repAttr">Atracción</label>
             <select id="repAttr" bind:value={adminReportFilters.attractionId}>
               <option value="">Todas</option>
               {#each adminAttractions as a}
@@ -740,12 +754,13 @@
               <thead>
                 <tr>
                   <th>Folio</th>
-                  <th>Atraccion</th>
+                  <th>Atracción</th>
                   <th>Nombre</th>
                   <th>Correo</th>
-                  <th>Telefono</th>
+                  <th>Teléfono</th>
                   <th>Nacimiento</th>
                   <th>Estado</th>
+                  <th>QR validado (staff)</th>
                   <th>Fecha registro</th>
                 </tr>
               </thead>
@@ -759,6 +774,7 @@
                     <td>{row.phone}</td>
                     <td>{row.birthDate}</td>
                     <td>{row.status}</td>
+                    <td>{row.qrConsumedAt ? new Date(row.qrConsumedAt).toLocaleString("es-MX") : "—"}</td>
                     <td>{new Date(row.createdAt).toLocaleString()}</td>
                   </tr>
                 {/each}
@@ -773,7 +789,7 @@
               Anterior
             </button>
             <span class="pager-info">
-              Pagina {adminReport.page} de {Math.max(1, Math.ceil(adminReport.total / adminReport.pageSize))}
+              Página {adminReport.page} de {Math.max(1, Math.ceil(adminReport.total / adminReport.pageSize))}
               ({adminReport.total} total)
             </span>
             <button
@@ -783,7 +799,7 @@
             >
               Siguiente
             </button>
-            <label class="field-label inline-label" for="repPs">Por pagina</label>
+            <label class="field-label inline-label" for="repPs">Por página</label>
             <select
               id="repPs"
               bind:value={adminReport.pageSize}
@@ -830,13 +846,13 @@
         </button>
       {/if}
 
-      <label><input type="checkbox" bind:checked={form.hasMedicalCondition} /> Tengo condicion medica relevante</label>
-      <label><input type="checkbox" bind:checked={form.consumedAlcoholOrDrugs} /> Consumi alcohol o drogas hoy</label>
+      <label><input type="checkbox" bind:checked={form.hasMedicalCondition} /> Tengo condición médica relevante</label>
+      <label><input type="checkbox" bind:checked={form.consumedAlcoholOrDrugs} /> Consumí alcohol o drogas hoy</label>
       <label><input type="checkbox" bind:checked={form.acceptsSafetyRules} /> Acepto reglas de seguridad</label>
 
       <h3>Carta responsiva</h3>
       <p class="waiver">{selectedAttraction?.waiverText || ""}</p>
-      <label><input type="checkbox" bind:checked={form.acceptedText} /> Lei y acepto la carta responsiva</label>
+      <label><input type="checkbox" bind:checked={form.acceptedText} /> Leí y acepto la carta responsiva</label>
       <p><b>Firma manuscrita</b> (usa mouse, dedo o stylus)</p>
       <canvas class="signature-pad" bind:this={signatureCanvas} use:signaturePad width="700" height="180"></canvas>
       <button type="button" on:click={clearSignature}>Limpiar firma</button>
@@ -871,13 +887,13 @@
           <h2>Waiver firmado</h2>
           <p><b>Folio:</b> {waiverResult.waiverId}</p>
           <p><b>Firmado:</b> {new Date(waiverResult.signedAt).toLocaleString()}</p>
-          <p><b>Codigo QR de validacion</b></p>
+          <p><b>Código QR de validación</b></p>
           <canvas bind:this={qrCanvas}></canvas>
           <p class="modal-help">
-            Muestra este QR al staff para validar tu acceso a la atraccion.
+            Muestra este QR al personal para validar tu acceso a la atracción.
           </p>
           {#if waiverResult.emailSent}
-            <p class="ok">Tambien enviamos este QR al correo registrado.</p>
+            <p class="ok">También enviamos este QR al correo registrado.</p>
           {/if}
           <button type="button" on:click={resetRegistrationFlow}>Aceptar</button>
         </div>
@@ -1031,7 +1047,7 @@
     width: 100%;
     border-collapse: collapse;
     font-size: 13px;
-    min-width: 720px;
+    min-width: 920px;
   }
   .report-table th,
   .report-table td {

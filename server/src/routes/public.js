@@ -51,7 +51,7 @@ export function publicRoutes({ jwtSecret }) {
       return res.status(400).json({ error: "Datos incompletos." });
     }
     if (!String(signatureImage).startsWith("data:image/png;base64,")) {
-      return res.status(400).json({ error: "Firma manuscrita invalida." });
+      return res.status(400).json({ error: "Firma manuscrita inválida." });
     }
     const requiredParticipant =
       participant.fullName &&
@@ -68,7 +68,7 @@ export function publicRoutes({ jwtSecret }) {
     }
 
     const age = calculateAge(participant.birthDate);
-    if (age === null || age < 0) return res.status(400).json({ error: "Fecha de nacimiento invalida." });
+    if (age === null || age < 0) return res.status(400).json({ error: "Fecha de nacimiento inválida." });
     const isMinor = age < 18;
 
     if (isMinor) {
@@ -86,7 +86,7 @@ export function publicRoutes({ jwtSecret }) {
     }
 
     const attraction = await Attraction.findOne({ _id: attractionId, active: true }).lean();
-    if (!attraction) return res.status(404).json({ error: "Atraccion no encontrada." });
+    if (!attraction) return res.status(404).json({ error: "Atracción no encontrada." });
 
     const signedAt = new Date();
     const waiver = await Waiver.create({
@@ -140,7 +140,17 @@ export function publicRoutes({ jwtSecret }) {
       const waiver = await Waiver.findById(payload.waiverId).lean();
 
       if (!waiver || waiver.status !== "signed") {
-        return res.status(404).json({ valid: false, error: "Waiver invalido o revocado." });
+        return res.status(404).json({ valid: false, error: "Waiver inválido o revocado." });
+      }
+
+      if (waiver.qrConsumedAt) {
+        return res.json({
+          valid: false,
+          reason: "qr_already_used",
+          usedAt: waiver.qrConsumedAt,
+          attractionName: waiver.attractionName,
+          fullName: waiver.participant.fullName
+        });
       }
 
       return res.json({
@@ -155,7 +165,7 @@ export function publicRoutes({ jwtSecret }) {
         }
       });
     } catch (_error) {
-      return res.status(400).json({ valid: false, error: "Token invalido." });
+      return res.status(400).json({ valid: false, error: "Token inválido." });
     }
   });
 

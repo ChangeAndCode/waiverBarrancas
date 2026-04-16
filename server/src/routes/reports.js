@@ -48,24 +48,56 @@ export function reportRoutes({ jwtSecret }) {
   router.get("/validate/:token", async (req, res) => {
     try {
       const payload = verifyWaiverToken(req.params.token, jwtSecret);
-      const waiver = await Waiver.findById(payload.waiverId).lean();
+      const waiverId = payload.waiverId;
 
+      const waiver = await Waiver.findById(waiverId).lean();
       if (!waiver || waiver.status !== "signed") {
-        return res.status(404).json({ valid: false, error: "Waiver invalido o revocado." });
+        return res.status(404).json({ valid: false, error: "Waiver inválido o revocado." });
       }
+
+      if (waiver.qrConsumedAt) {
+        return res.json({
+          valid: false,
+          reason: "qr_already_used",
+          usedAt: waiver.qrConsumedAt,
+          attractionName: waiver.attractionName,
+          fullName: waiver.participant.fullName
+        });
+      }
+
+      const consumed = await Waiver.findOneAndUpdate(
+        { _id: waiverId, status: "signed", qrConsumedAt: null },
+        { $set: { qrConsumedAt: new Date() } },
+        { new: true }
+      ).lean();
+
+      if (!consumed) {
+        const again = await Waiver.findById(waiverId).lean();
+        if (!again || again.status !== "signed") {
+          return res.status(404).json({ valid: false, error: "Waiver inválido o revocado." });
+        }
+        return res.json({
+          valid: false,
+          reason: "qr_already_used",
+          usedAt: again.qrConsumedAt,
+          attractionName: again.attractionName,
+          fullName: again.participant.fullName
+        });
+      }
+
       return res.json({
         valid: true,
         waiver: {
-          id: waiver._id,
-          attractionName: waiver.attractionName,
-          fullName: waiver.participant.fullName,
-          birthDate: waiver.participant.birthDate,
-          signedAt: waiver.createdAt,
-          status: waiver.status
+          id: consumed._id,
+          attractionName: consumed.attractionName,
+          fullName: consumed.participant.fullName,
+          birthDate: consumed.participant.birthDate,
+          signedAt: consumed.createdAt,
+          status: consumed.status
         }
       });
     } catch (_error) {
-      return res.status(400).json({ valid: false, error: "Token invalido." });
+      return res.status(400).json({ valid: false, error: "Token inválido." });
     }
   });
 

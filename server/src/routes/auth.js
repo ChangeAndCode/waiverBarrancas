@@ -11,14 +11,14 @@ export function authRoutes({ jwtSecret }) {
     const password = String(req.body?.password || "");
 
     if (!email || !password) {
-      return res.status(400).json({ error: "email y password son requeridos." });
+      return res.status(400).json({ error: "Correo y contraseña son obligatorios." });
     }
 
     const user = await User.findOne({ email, active: true });
-    if (!user) return res.status(401).json({ error: "Credenciales invalidas." });
+    if (!user) return res.status(401).json({ error: "Credenciales inválidas." });
 
     const valid = await bcrypt.compare(password, user.passwordHash);
-    if (!valid) return res.status(401).json({ error: "Credenciales invalidas." });
+    if (!valid) return res.status(401).json({ error: "Credenciales inválidas." });
 
     const token = signAuthToken(user, jwtSecret);
     res.json({
