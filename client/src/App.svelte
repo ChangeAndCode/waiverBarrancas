@@ -1,4 +1,5 @@
 <script>
+  import { onDestroy } from "svelte";
   import QRCode from "qrcode";
   import logoBarrancas from "../logobarrancas.png";
 
@@ -22,6 +23,16 @@
   let selectedAttraction = null;
   let waiverResult = null;
   let checkData = null;
+
+  let staffScanPaste = "";
+  let staffScanResult = null;
+  let staffScanBusy = false;
+  let staffScanError = "";
+  let staffScanRunning = false;
+  let staffScanVideoEl;
+  let staffScanStream = null;
+  let staffScanRaf = 0;
+  let staffScanDetector = null;
 
   let loginForm = { email: "", password: "" };
   let adminAttractions = [];
@@ -366,16 +377,111 @@
     }
   }
 
-  async function loadCheck() {
-    if (!authToken) return goTo(`/admin?next=${encodeURIComponent(path)}`);
-    const token = path.split("/check/")[1];
-    if (!token) return;
+  function extractWaiverTokenFromText(text) {
+    const s = String(text).trim();
+    const m = s.match(/\/check\/([^/?#]+)/);
+    if (m) return m[1];
+    if (s && !/\s/.test(s) && s.length >= 12) return s;
+    return "";
+  }
+
+  function stopStaffScan() {
+    staffScanRunning = false;
+    if (staffScanRaf) cancelAnimationFrame(staffScanRaf);
+    staffScanRaf = 0;
+    if (staffScanStream) {
+      staffScanStream.getTracks().forEach((t) => t.stop());
+      staffScanStream = null;
+    }
+    if (staffScanVideoEl) staffScanVideoEl.srcObject = null;
+    staffScanDetector = null;
+  }
+
+  onDestroy(stopStaffScan);
+
+  $: if (!(path === "/staff" && authToken)) stopStaffScan();
+
+  async function staffConsumeQrFromRaw(raw) {
+    const token = extractWaiverTokenFromText(raw);
+    if (!token) {
+      staffScanError = "No se reconoció un código del parque.";
+      return;
+    }
+    staffScanBusy = true;
+    staffScanError = "";
     try {
-      checkData = await api(`/reports/validate/${token}`);
-      message = "";
+      staffScanResult = await api(`/reports/validate/${encodeURIComponent(token)}`);
+      await loadReport();
     } catch (e) {
+      staffScanResult = null;
+      staffScanError = e.message;
+    } finally {
+      staffScanBusy = false;
+    }
+  }
+
+  async function startStaffScan() {
+    staffScanError = "";
+    if (!("BarcodeDetector" in window)) {
+      staffScanError =
+        "Este navegador no puede leer QR con la cámara. Pega abajo la URL que te muestre el lector del teléfono.";
+      return;
+    }
+    stopStaffScan();
+    staffScanResult = null;
+    try {
+      staffScanStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" } }
+      });
+      staffScanVideoEl.srcObject = staffScanStream;
+      await staffScanVideoEl.play();
+      staffScanDetector = new BarcodeDetector({ formats: ["qr_code"] });
+      staffScanRunning = true;
+      let lastDetect = 0;
+      const tick = async () => {
+        if (!staffScanRunning) return;
+        staffScanRaf = requestAnimationFrame(tick);
+        const now = performance.now();
+        if (now - lastDetect < 380 || staffScanBusy) return;
+        lastDetect = now;
+        try {
+          const codes = await staffScanDetector.detect(staffScanVideoEl);
+          if (codes.length && codes[0].rawValue) {
+            stopStaffScan();
+            await staffConsumeQrFromRaw(codes[0].rawValue);
+          }
+        } catch {
+          /* frame */
+        }
+      };
+      tick();
+    } catch (e) {
+      staffScanError = e.message || "No se pudo abrir la cámara.";
+      stopStaffScan();
+    }
+  }
+
+  async function loadCheck() {
+    const token = path.split("/check/")[1]?.split("?")[0];
+    if (!token) return;
+    checkData = null;
+    loading = true;
+    message = "";
+    try {
+      const r = await fetch(`${API_BASE}/public/check/${encodeURIComponent(token)}`);
+      const data = await r.json();
+      if (typeof data.valid === "boolean") {
+        checkData = data;
+        message = data.error || "";
+      } else {
+        checkData = null;
+        message = "No se pudo cargar el código.";
+      }
+    } catch {
       checkData = null;
-      message = e.message;
+      message = "No se pudo cargar.";
+    } finally {
+      loading = false;
     }
   }
 
@@ -570,18 +676,20 @@
 
   {#if path.startsWith("/check/")}
     <section class="card">
-      <h2>Validación de QR (staff)</h2>
+      <h2>Tu código de acceso</h2>
       {#if checkData?.valid}
-        <p class="ok">VÁLIDO</p>
+        <p class="ok">Listo para ingresar</p>
         <p><b>Nombre:</b> {checkData.waiver.fullName}</p>
         <p><b>Atracción:</b> {checkData.waiver.attractionName}</p>
         <p><b>Fecha de firma:</b> {new Date(checkData.waiver.signedAt).toLocaleString()}</p>
         <p><b>Folio:</b> {checkData.waiver.id}</p>
-        <p class="muted">Este QR queda inhabilitado; la próxima lectura mostrará expirado.</p>
-      {:else if checkData?.reason === "qr_already_used"}
-        <p class="bad">EXPIRADO</p>
         <p class="muted">
-          Este código ya fue validado. Para volver a subirse el participante debe firmar un waiver nuevo.
+          Muéstralo al personal en la atracción. Abrir este enlace o escanearlo tú mismo aquí no lo marca como usado.
+        </p>
+      {:else if checkData?.reason === "qr_already_used"}
+        <p class="bad">Ya fue usado en atracción</p>
+        <p class="muted">
+          Este código ya fue validado por el personal. Para otra vuelta hace falta firmar un waiver nuevo.
         </p>
         <p><b>Atracción en la que se validó:</b> {checkData.attractionName}</p>
         <p><b>Validado el:</b> {new Date(checkData.usedAt).toLocaleString("es-MX")}</p>
@@ -589,22 +697,58 @@
           <p><b>Nombre:</b> {checkData.fullName}</p>
         {/if}
       {:else}
-        <p class="bad">INVÁLIDO</p>
-        <p>{message || "No se pudo validar."}</p>
+        <p class="bad">No disponible</p>
+        <p>{message || "No se pudo mostrar el código."}</p>
       {/if}
     </section>
   {:else if path === "/staff"}
     <section class="card">
       <h2>Panel Staff</h2>
       <p>Usuario: {authUser?.name} ({authUser?.role})</p>
-      <p>
-        Escanea el QR y abre la URL para validar. Cada QR solo sirve una vez: al validarlo queda usado y el participante
-        debe firmar de nuevo para otra vuelta. Aquí ves reportes básicos.
+      <p class="muted">
+        Inicia sesión aquí (sesión hasta 7 días). Valida con la cámara o pegando el enlace; solo entonces el QR queda
+        usado. Si el visitante abre el enlace del correo, solo ve su pase, sin gastarlo.
       </p>
+
+      <h3>Validar QR</h3>
+      {#if staffScanError}<p class="bad">{staffScanError}</p>{/if}
+      <video bind:this={staffScanVideoEl} class="staff-scan-video" playsinline muted></video>
+      <div class="inline-actions staff-scan-actions">
+        {#if staffScanRunning}
+          <button type="button" on:click={stopStaffScan}>Detener cámara</button>
+        {:else}
+          <button type="button" on:click={startStaffScan} disabled={staffScanBusy}>Escanear con cámara</button>
+        {/if}
+      </div>
+      <label class="field-label" for="staffPaste">Pegar URL o token del QR</label>
+      <textarea id="staffPaste" bind:value={staffScanPaste} rows="2" placeholder="https://…/check/…"></textarea>
+      <button type="button" on:click={() => staffConsumeQrFromRaw(staffScanPaste)} disabled={staffScanBusy}>
+        {staffScanBusy ? "Validando…" : "Validar pegado"}
+      </button>
+      <button type="button" class="secondary" on:click={() => { staffScanResult = null; staffScanError = ""; }}>
+        Limpiar resultado
+      </button>
+
+      {#if staffScanResult?.valid}
+        <div class="staff-scan-result">
+          <p class="ok">VÁLIDO — registrado</p>
+          <p><b>Nombre:</b> {staffScanResult.waiver.fullName}</p>
+          <p><b>Atracción:</b> {staffScanResult.waiver.attractionName}</p>
+          <p><b>Folio:</b> {staffScanResult.waiver.id}</p>
+        </div>
+      {:else if staffScanResult?.reason === "qr_already_used"}
+        <div class="staff-scan-result">
+          <p class="bad">Ya estaba usado</p>
+          <p><b>Atracción:</b> {staffScanResult.attractionName}</p>
+          <p><b>Validado el:</b> {new Date(staffScanResult.usedAt).toLocaleString("es-MX")}</p>
+          {#if staffScanResult.fullName}<p><b>Nombre:</b> {staffScanResult.fullName}</p>{/if}
+        </div>
+      {/if}
+
+      <h3>Últimos registros</h3>
       {#if report.summary}
         <p><b>Total:</b> {report.summary.total} | <b>Firmados:</b> {report.summary.signed} | <b>Revocados:</b> {report.summary.revoked}</p>
       {/if}
-      <h3>Últimos registros</h3>
       {#each report.waivers as item}
         <div class="item">
           <p>{item.fullName} - {item.attractionName} - {new Date(item.createdAt).toLocaleString()}</p>
@@ -1020,6 +1164,33 @@
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
+  }
+  button.secondary {
+    background: #eee8dc;
+    color: #1f4a3b;
+    border: 1px solid #d5c5ad;
+  }
+  button.secondary:hover {
+    background: #e4dcc8;
+  }
+  .staff-scan-video {
+    width: 100%;
+    max-width: 420px;
+    border-radius: 8px;
+    background: #1a1a1a;
+    min-height: 200px;
+  }
+  .staff-scan-actions {
+    margin-top: 4px;
+  }
+  .staff-scan-result {
+    margin-top: 10px;
+    padding: 12px;
+    background: #fff;
+    border: 1px solid #e3d7c4;
+    border-radius: 8px;
+    display: grid;
+    gap: 8px;
   }
   .edit-card {
     margin-top: 6px;

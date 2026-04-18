@@ -9,7 +9,7 @@ export function signAuthToken(user, jwtSecret) {
       name: user.name
     },
     jwtSecret,
-    { expiresIn: "12h" }
+    { expiresIn: "7d" }
   );
 }
 
