@@ -88,49 +88,98 @@
     ctx.strokeStyle = "#1f4a3b";
 
     let drawing = false;
+    let activeTouchId = null;
+    const docTouchOpts = { capture: true, passive: false };
 
-    function pointFromEvent(event) {
+    function pointFromClient(clientX, clientY) {
       const rect = node.getBoundingClientRect();
-      const source = event.touches?.[0] || event;
-      return { x: source.clientX - rect.left, y: source.clientY - rect.top };
+      const sx = node.width / rect.width;
+      const sy = node.height / rect.height;
+      return { x: (clientX - rect.left) * sx, y: (clientY - rect.top) * sy };
     }
 
-    function start(event) {
-      event.preventDefault();
-      drawing = true;
-      const p = pointFromEvent(event);
-      ctx.beginPath();
-      ctx.moveTo(p.x, p.y);
+    function touchById(list, id) {
+      for (let i = 0; i < list.length; i++) {
+        if (list[i].identifier === id) return list[i];
+      }
+      return null;
     }
 
-    function move(event) {
-      if (!drawing) return;
+    function detachGlobalTouch() {
+      document.removeEventListener("touchmove", onDocumentTouchMove, docTouchOpts);
+      document.removeEventListener("touchend", onDocumentTouchEnd, { capture: true });
+      document.removeEventListener("touchcancel", onDocumentTouchEnd, { capture: true });
+      activeTouchId = null;
+      drawing = false;
+    }
+
+    function onDocumentTouchMove(event) {
+      if (!drawing || activeTouchId === null) return;
+      const t = touchById(event.touches, activeTouchId);
+      if (!t) return;
       event.preventDefault();
-      const p = pointFromEvent(event);
+      const p = pointFromClient(t.clientX, t.clientY);
       ctx.lineTo(p.x, p.y);
       ctx.stroke();
       signatureHasStroke = true;
     }
 
-    function end() {
+    function onDocumentTouchEnd(event) {
+      if (!drawing || activeTouchId === null) return;
+      const ended = [...(event.changedTouches || [])].some((ch) => ch.identifier === activeTouchId);
+      if (!ended) return;
+      event.preventDefault();
+      detachGlobalTouch();
+    }
+
+    function startMouse(event) {
+      event.preventDefault();
+      drawing = true;
+      const p = pointFromClient(event.clientX, event.clientY);
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+    }
+
+    function moveMouse(event) {
+      if (!drawing) return;
+      event.preventDefault();
+      const p = pointFromClient(event.clientX, event.clientY);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+      signatureHasStroke = true;
+    }
+
+    function endMouse() {
       drawing = false;
     }
 
-    node.addEventListener("mousedown", start);
-    node.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", end);
-    node.addEventListener("touchstart", start, { passive: false });
-    node.addEventListener("touchmove", move, { passive: false });
-    window.addEventListener("touchend", end);
+    function startTouch(event) {
+      event.preventDefault();
+      if (drawing && activeTouchId !== null) return;
+      const t = event.changedTouches[0];
+      if (!t) return;
+      activeTouchId = t.identifier;
+      drawing = true;
+      document.addEventListener("touchmove", onDocumentTouchMove, docTouchOpts);
+      document.addEventListener("touchend", onDocumentTouchEnd, { capture: true });
+      document.addEventListener("touchcancel", onDocumentTouchEnd, { capture: true });
+      const p = pointFromClient(t.clientX, t.clientY);
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+    }
+
+    node.addEventListener("mousedown", startMouse);
+    node.addEventListener("mousemove", moveMouse);
+    window.addEventListener("mouseup", endMouse);
+    node.addEventListener("touchstart", startTouch, { passive: false });
 
     return {
       destroy() {
-        node.removeEventListener("mousedown", start);
-        node.removeEventListener("mousemove", move);
-        window.removeEventListener("mouseup", end);
-        node.removeEventListener("touchstart", start);
-        node.removeEventListener("touchmove", move);
-        window.removeEventListener("touchend", end);
+        detachGlobalTouch();
+        node.removeEventListener("mousedown", startMouse);
+        node.removeEventListener("mousemove", moveMouse);
+        window.removeEventListener("mouseup", endMouse);
+        node.removeEventListener("touchstart", startTouch);
       }
     };
   }
@@ -142,49 +191,98 @@
     ctx.strokeStyle = "#1f4a3b";
 
     let drawing = false;
+    let activeTouchId = null;
+    const docTouchOpts = { capture: true, passive: false };
 
-    function pointFromEvent(event) {
+    function pointFromClient(clientX, clientY) {
       const rect = node.getBoundingClientRect();
-      const source = event.touches?.[0] || event;
-      return { x: source.clientX - rect.left, y: source.clientY - rect.top };
+      const sx = node.width / rect.width;
+      const sy = node.height / rect.height;
+      return { x: (clientX - rect.left) * sx, y: (clientY - rect.top) * sy };
     }
 
-    function start(event) {
-      event.preventDefault();
-      drawing = true;
-      const p = pointFromEvent(event);
-      ctx.beginPath();
-      ctx.moveTo(p.x, p.y);
+    function touchById(list, id) {
+      for (let i = 0; i < list.length; i++) {
+        if (list[i].identifier === id) return list[i];
+      }
+      return null;
     }
 
-    function move(event) {
-      if (!drawing) return;
+    function detachGlobalTouch() {
+      document.removeEventListener("touchmove", onDocumentTouchMove, docTouchOpts);
+      document.removeEventListener("touchend", onDocumentTouchEnd, { capture: true });
+      document.removeEventListener("touchcancel", onDocumentTouchEnd, { capture: true });
+      activeTouchId = null;
+      drawing = false;
+    }
+
+    function onDocumentTouchMove(event) {
+      if (!drawing || activeTouchId === null) return;
+      const t = touchById(event.touches, activeTouchId);
+      if (!t) return;
       event.preventDefault();
-      const p = pointFromEvent(event);
+      const p = pointFromClient(t.clientX, t.clientY);
       ctx.lineTo(p.x, p.y);
       ctx.stroke();
       guardianSignatureHasStroke = true;
     }
 
-    function end() {
+    function onDocumentTouchEnd(event) {
+      if (!drawing || activeTouchId === null) return;
+      const ended = [...(event.changedTouches || [])].some((ch) => ch.identifier === activeTouchId);
+      if (!ended) return;
+      event.preventDefault();
+      detachGlobalTouch();
+    }
+
+    function startMouse(event) {
+      event.preventDefault();
+      drawing = true;
+      const p = pointFromClient(event.clientX, event.clientY);
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+    }
+
+    function moveMouse(event) {
+      if (!drawing) return;
+      event.preventDefault();
+      const p = pointFromClient(event.clientX, event.clientY);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+      guardianSignatureHasStroke = true;
+    }
+
+    function endMouse() {
       drawing = false;
     }
 
-    node.addEventListener("mousedown", start);
-    node.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", end);
-    node.addEventListener("touchstart", start, { passive: false });
-    node.addEventListener("touchmove", move, { passive: false });
-    window.addEventListener("touchend", end);
+    function startTouch(event) {
+      event.preventDefault();
+      if (drawing && activeTouchId !== null) return;
+      const t = event.changedTouches[0];
+      if (!t) return;
+      activeTouchId = t.identifier;
+      drawing = true;
+      document.addEventListener("touchmove", onDocumentTouchMove, docTouchOpts);
+      document.addEventListener("touchend", onDocumentTouchEnd, { capture: true });
+      document.addEventListener("touchcancel", onDocumentTouchEnd, { capture: true });
+      const p = pointFromClient(t.clientX, t.clientY);
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+    }
+
+    node.addEventListener("mousedown", startMouse);
+    node.addEventListener("mousemove", moveMouse);
+    window.addEventListener("mouseup", endMouse);
+    node.addEventListener("touchstart", startTouch, { passive: false });
 
     return {
       destroy() {
-        node.removeEventListener("mousedown", start);
-        node.removeEventListener("mousemove", move);
-        window.removeEventListener("mouseup", end);
-        node.removeEventListener("touchstart", start);
-        node.removeEventListener("touchmove", move);
-        window.removeEventListener("touchend", end);
+        detachGlobalTouch();
+        node.removeEventListener("mousedown", startMouse);
+        node.removeEventListener("mousemove", moveMouse);
+        window.removeEventListener("mouseup", endMouse);
+        node.removeEventListener("touchstart", startTouch);
       }
     };
   }
