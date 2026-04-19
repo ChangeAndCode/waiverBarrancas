@@ -1,5 +1,5 @@
 <script>
-  import { onDestroy } from "svelte";
+  import { onDestroy, tick } from "svelte";
   import QRCode from "qrcode";
   import logoBarrancas from "../logobarrancas.png";
 
@@ -385,20 +385,27 @@
     selectedAttraction = attractions.find((a) => a._id === selectedAttractionId) || null;
   }
 
+  let waiverSubmitInFlight = false;
+
   async function submitWaiver() {
+    if (waiverSubmitInFlight) return;
+    waiverSubmitInFlight = true;
     loading = true;
     message = "";
     if (!hasRequiredParticipantFields()) {
+      waiverSubmitInFlight = false;
       loading = false;
       message = "Todos los campos son obligatorios y debes aceptar reglas y carta responsiva.";
       return;
     }
     if (!signatureHasStroke || !signatureCanvas) {
+      waiverSubmitInFlight = false;
       loading = false;
       message = "La firma manuscrita es obligatoria.";
       return;
     }
     if (isMinor && !hasRequiredGuardianFields()) {
+      waiverSubmitInFlight = false;
       loading = false;
       guardianModalOpen = true;
       message = "El participante es menor de edad. Captura datos y firma del tutor.";
@@ -435,12 +442,19 @@
             }
           : undefined
       });
-      setTimeout(() => {
-        if (qrCanvas && waiverResult?.qrUrl) QRCode.toCanvas(qrCanvas, waiverResult.qrUrl);
-      }, 0);
+      await tick();
+      if (!qrCanvas) await tick();
+      if (waiverResult?.qrUrl && qrCanvas) {
+        try {
+          await QRCode.toCanvas(qrCanvas, waiverResult.qrUrl);
+        } catch {
+          /* mismo comportamiento silencioso que antes si el canvas fallaba */
+        }
+      }
     } catch (e) {
       message = e.message;
     } finally {
+      waiverSubmitInFlight = false;
       loading = false;
     }
   }
@@ -500,6 +514,7 @@
   $: if (!(path === "/staff" && authToken)) stopStaffScan();
 
   async function staffConsumeQrFromRaw(raw) {
+    if (staffScanBusy) return;
     const token = extractWaiverTokenFromText(raw);
     if (!token) {
       staffScanError = "No se reconoció un código del parque.";
@@ -533,20 +548,25 @@
       if ("BarcodeDetector" in window) {
         staffScanDetector = new BarcodeDetector({ formats: ["qr_code"] });
         let lastDetect = 0;
+        let barcodeDetectBusy = false;
         const tick = async () => {
           if (!staffScanRunning) return;
           staffScanRaf = requestAnimationFrame(tick);
           const now = performance.now();
-          if (now - lastDetect < 380 || staffScanBusy) return;
-          lastDetect = now;
+          if (barcodeDetectBusy || staffScanBusy) return;
+          if (now - lastDetect < 380) return;
+          barcodeDetectBusy = true;
           try {
             const codes = await staffScanDetector.detect(staffScanVideoEl);
+            lastDetect = performance.now();
             if (codes.length && codes[0].rawValue) {
               stopStaffScan();
               await staffConsumeQrFromRaw(codes[0].rawValue);
             }
           } catch {
             /* frame */
+          } finally {
+            barcodeDetectBusy = false;
           }
         };
         tick();
@@ -557,31 +577,39 @@
       const decodeCanvas = document.createElement("canvas");
       const decodeCtx = decodeCanvas.getContext("2d", { willReadFrequently: true });
       let lastDecode = 0;
-      const tickJs = () => {
+      let jsqrDecodeBusy = false;
+      const tickJs = async () => {
         if (!staffScanRunning) return;
         staffScanRaf = requestAnimationFrame(tickJs);
         const now = performance.now();
-        if (now - lastDecode < 280 || staffScanBusy) return;
-        lastDecode = now;
+        if (jsqrDecodeBusy || staffScanBusy) return;
+        if (now - lastDecode < 280) return;
         const vw = staffScanVideoEl.videoWidth;
         const vh = staffScanVideoEl.videoHeight;
-        if (vw < 16 || vh < 16) return;
-        const maxW = 720;
-        const sc = Math.min(1, maxW / vw);
-        const dw = Math.floor(vw * sc);
-        const dh = Math.floor(vh * sc);
-        decodeCanvas.width = dw;
-        decodeCanvas.height = dh;
+        if (vw < 16 || vh < 16) {
+          lastDecode = performance.now();
+          return;
+        }
+        jsqrDecodeBusy = true;
         try {
+          const maxW = 720;
+          const sc = Math.min(1, maxW / vw);
+          const dw = Math.floor(vw * sc);
+          const dh = Math.floor(vh * sc);
+          decodeCanvas.width = dw;
+          decodeCanvas.height = dh;
           decodeCtx.drawImage(staffScanVideoEl, 0, 0, dw, dh);
           const img = decodeCtx.getImageData(0, 0, dw, dh);
           const hit = jsQR(img.data, dw, dh, { inversionAttempts: "attemptBoth" });
+          lastDecode = performance.now();
           if (hit?.data) {
             stopStaffScan();
-            void staffConsumeQrFromRaw(hit.data);
+            await staffConsumeQrFromRaw(hit.data);
           }
         } catch {
-          /* frame */
+          lastDecode = performance.now();
+        } finally {
+          jsqrDecodeBusy = false;
         }
       };
       tickJs();
