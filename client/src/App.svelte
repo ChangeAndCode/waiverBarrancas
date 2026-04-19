@@ -520,39 +520,71 @@
 
   async function startStaffScan() {
     staffScanError = "";
-    if (!("BarcodeDetector" in window)) {
-      staffScanError =
-        "Este navegador no puede leer QR con la cámara. Pega abajo la URL que te muestre el lector del teléfono.";
-      return;
-    }
     stopStaffScan();
     staffScanResult = null;
+    staffScanRunning = true;
     try {
       staffScanStream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: { ideal: "environment" } }
       });
       staffScanVideoEl.srcObject = staffScanStream;
       await staffScanVideoEl.play();
-      staffScanDetector = new BarcodeDetector({ formats: ["qr_code"] });
-      staffScanRunning = true;
-      let lastDetect = 0;
-      const tick = async () => {
+
+      if ("BarcodeDetector" in window) {
+        staffScanDetector = new BarcodeDetector({ formats: ["qr_code"] });
+        let lastDetect = 0;
+        const tick = async () => {
+          if (!staffScanRunning) return;
+          staffScanRaf = requestAnimationFrame(tick);
+          const now = performance.now();
+          if (now - lastDetect < 380 || staffScanBusy) return;
+          lastDetect = now;
+          try {
+            const codes = await staffScanDetector.detect(staffScanVideoEl);
+            if (codes.length && codes[0].rawValue) {
+              stopStaffScan();
+              await staffConsumeQrFromRaw(codes[0].rawValue);
+            }
+          } catch {
+            /* frame */
+          }
+        };
+        tick();
+        return;
+      }
+
+      const jsQR = (await import("jsqr")).default;
+      const decodeCanvas = document.createElement("canvas");
+      const decodeCtx = decodeCanvas.getContext("2d", { willReadFrequently: true });
+      let lastDecode = 0;
+      const tickJs = () => {
         if (!staffScanRunning) return;
-        staffScanRaf = requestAnimationFrame(tick);
+        staffScanRaf = requestAnimationFrame(tickJs);
         const now = performance.now();
-        if (now - lastDetect < 380 || staffScanBusy) return;
-        lastDetect = now;
+        if (now - lastDecode < 280 || staffScanBusy) return;
+        lastDecode = now;
+        const vw = staffScanVideoEl.videoWidth;
+        const vh = staffScanVideoEl.videoHeight;
+        if (vw < 16 || vh < 16) return;
+        const maxW = 720;
+        const sc = Math.min(1, maxW / vw);
+        const dw = Math.floor(vw * sc);
+        const dh = Math.floor(vh * sc);
+        decodeCanvas.width = dw;
+        decodeCanvas.height = dh;
         try {
-          const codes = await staffScanDetector.detect(staffScanVideoEl);
-          if (codes.length && codes[0].rawValue) {
+          decodeCtx.drawImage(staffScanVideoEl, 0, 0, dw, dh);
+          const img = decodeCtx.getImageData(0, 0, dw, dh);
+          const hit = jsQR(img.data, dw, dh, { inversionAttempts: "attemptBoth" });
+          if (hit?.data) {
             stopStaffScan();
-            await staffConsumeQrFromRaw(codes[0].rawValue);
+            void staffConsumeQrFromRaw(hit.data);
           }
         } catch {
           /* frame */
         }
       };
-      tick();
+      tickJs();
     } catch (e) {
       staffScanError = e.message || "No se pudo abrir la cámara.";
       stopStaffScan();
