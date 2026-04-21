@@ -4,6 +4,17 @@ import { Waiver } from "../models/Waiver.js";
 import { signWaiverToken, verifyWaiverToken } from "../lib/token.js";
 import { renderWaiverTextForSignature } from "../lib/waiverText.js";
 import { sendWaiverQrEmail } from "../lib/email.js";
+import Stripe from "stripe";
+
+function getStripeClient() {
+  const secretKey = process.env.STRIPE_SECRET_KEY;
+
+  if (!secretKey) {
+    throw new Error("Falta STRIPE_SECRET_KEY en las variables de entorno.");
+  }
+
+  return new Stripe(secretKey);
+}
 
 function baseUrlFromRequest(req) {
   if (process.env.PUBLIC_BASE_URL) return process.env.PUBLIC_BASE_URL;
@@ -35,6 +46,37 @@ export function publicRoutes({ jwtSecret }) {
       }))
     );
   });
+
+  router.post("/create-checkout-session", async (req, res) => {
+  try {
+const { amount = 1000, successPath = "/success", cancelPath = "/cancel" } = req.body;
+
+    const stripe = getStripeClient();
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ["card"],
+      mode: "payment",
+      line_items: [
+        {
+          price_data: {
+            currency: "mxn",
+            product_data: {
+              name: "Acceso a atracción"
+            },
+            unit_amount: amount
+          },
+          quantity: 1
+        }
+      ],
+      success_url: `${process.env.CLIENT_URL}${successPath}`,
+      cancel_url: `${process.env.CLIENT_URL}${cancelPath}`
+    });
+
+    res.json({ url: session.url });
+  } catch (error) {
+    console.error("Stripe error:", error);
+    res.status(500).json({ error: error.message || "Error creando sesión de pago" });
+  }
+});
 
   router.post("/waivers", async (req, res) => {
     const {

@@ -3,7 +3,7 @@
   import QRCode from "qrcode";
   import logoBarrancas from "../logobarrancas.png";
 
-  const API_BASE = "/api";
+  const API_BASE = "http://localhost:4000/api";
   let path = window.location.pathname;
   let query = new URLSearchParams(window.location.search);
   let loading = false;
@@ -23,6 +23,7 @@
   let selectedAttraction = null;
   let waiverResult = null;
   let checkData = null;
+  let paymentSuccessInFlight = false;
 
   let staffScanPaste = "";
   let staffScanResult = null;
@@ -390,14 +391,23 @@
   }
 
   async function api(url, method = "GET", payload) {
-    const r = await fetch(`${API_BASE}${url}`, {
-      method,
-      headers: { "content-type": "application/json", ...authHeaders() },
-      body: payload ? JSON.stringify(payload) : undefined
-    });
-    if (!r.ok) throw new Error((await r.json()).error || "Error");
-    return r.json();
+  const r = await fetch(`${API_BASE}${url}`, {
+    method,
+    headers: { "content-type": "application/json", ...authHeaders() },
+    body: payload ? JSON.stringify(payload) : undefined
+  });
+
+  const contentType = r.headers.get("content-type") || "";
+  const isJson = contentType.includes("application/json");
+  const data = isJson ? await r.json() : await r.text();
+
+  if (!r.ok) {
+    if (isJson && data?.error) throw new Error(data.error);
+    throw new Error(typeof data === "string" ? data : "Error");
   }
+
+  return data;
+}
 
   async function loadPublicAttractions() {
     attractions = await api("/public/attractions");
@@ -435,7 +445,8 @@
       const signatureImage = signatureCanvas.toDataURL("image/png");
       const guardianSignatureImage =
         guardianSignaturePng || guardianSignatureCanvas?.toDataURL("image/png");
-      waiverResult = await api("/public/waivers", "POST", {
+
+      const pendingWaiverPayload = {
         attractionId: selectedAttractionId,
         participant: {
           fullName: form.fullName,
@@ -462,16 +473,22 @@
               signatureImage: guardianSignatureImage
             }
           : undefined
+      };
+
+      sessionStorage.setItem("pendingWaiverPayload", JSON.stringify(pendingWaiverPayload));
+
+      const checkout = await api("/public/create-checkout-session", "POST", {
+        amount: 1000,
+        successPath: "/success",
+        cancelPath: "/cancel"
       });
-      await tick();
-      if (!qrCanvas) await tick();
-      if (waiverResult?.qrUrl && qrCanvas) {
-        try {
-          await QRCode.toCanvas(qrCanvas, waiverResult.qrUrl);
-        } catch {
-          /* mismo comportamiento silencioso que antes si el canvas fallaba */
-        }
+
+      if (!checkout?.url) {
+        throw new Error("No se recibió la URL de pago.");
       }
+
+      window.location.href = checkout.url;
+      return;
     } catch (e) {
       message = e.message;
     } finally {
@@ -479,6 +496,51 @@
       loading = false;
     }
   }
+
+  async function finalizeSuccessfulPayment() {
+  if (paymentSuccessInFlight) return;
+  paymentSuccessInFlight = true;
+  loading = true;
+  message = "";
+
+  try {
+    const raw = sessionStorage.getItem("pendingWaiverPayload");
+    if (!raw) {
+      message = "El pago se completó, pero no se encontró la información del waiver para finalizarlo.";
+      return;
+    }
+
+    const payload = JSON.parse(raw);
+    waiverResult = await api("/public/waivers", "POST", payload);
+    sessionStorage.removeItem("pendingWaiverPayload");
+
+    await tick();
+    if (!qrCanvas) await tick();
+    if (waiverResult?.qrUrl && qrCanvas) {
+      try {
+        await QRCode.toCanvas(qrCanvas, waiverResult.qrUrl);
+      } catch {
+        /* mismo comportamiento silencioso si el canvas falla */
+      }
+    }
+
+    history.replaceState({}, "", "/");
+    path = window.location.pathname;
+    query = new URLSearchParams(window.location.search);
+  } catch (e) {
+    message = e.message;
+  } finally {
+    loading = false;
+    paymentSuccessInFlight = false;
+  }
+}
+
+function handleCancelledPayment() {
+  message = "El pago fue cancelado. Puedes revisar tus datos e intentarlo de nuevo.";
+  history.replaceState({}, "", "/");
+  path = window.location.pathname;
+  query = new URLSearchParams(window.location.search);
+}
 
   function saveAuth(token, user) {
     authToken = token;
@@ -828,6 +890,16 @@
     if (path === "/admin") {
       if (!authToken || authUser?.role !== "admin") return;
       return loadAdminData();
+    }
+    if (path === "/success") {
+      await loadPublicAttractions();
+      await finalizeSuccessfulPayment();
+      return;
+    }
+    if (path === "/cancel") {
+      await loadPublicAttractions();
+      handleCancelledPayment();
+      return;
     }
     await loadPublicAttractions();
   }
@@ -1179,7 +1251,7 @@
       <p><b>Firma manuscrita</b> (usa mouse, dedo o stylus)</p>
       <canvas class="signature-pad" bind:this={signatureCanvas} use:signaturePad width="700" height="180"></canvas>
       <button type="button" on:click={clearSignature}>Limpiar firma</button>
-      <button on:click={submitWaiver} disabled={loading}>{loading ? "Guardando..." : "Firmar y generar QR"}</button>
+      <button on:click={submitWaiver} disabled={loading}>{loading ? "Redirigiendo al pago..." : "Firmar y pagar"}</button>
     </section>
 
     {#if guardianModalOpen}
