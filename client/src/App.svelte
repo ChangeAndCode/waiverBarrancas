@@ -66,6 +66,8 @@
     phone: "",
     email: ""
   };
+  /** Firma tutor persistida al cerrar el modal (el canvas se destruye al ocultarlo). */
+  let guardianSignaturePng = "";
 
   function getAge(birthDateString) {
     if (!birthDateString) return null;
@@ -295,10 +297,24 @@
   }
 
   function clearGuardianSignature() {
+    guardianSignaturePng = "";
+    guardianSignatureHasStroke = false;
     if (!guardianSignatureCanvas) return;
     const ctx = guardianSignatureCanvas.getContext("2d");
     ctx.clearRect(0, 0, guardianSignatureCanvas.width, guardianSignatureCanvas.height);
-    guardianSignatureHasStroke = false;
+  }
+
+  function saveGuardianModal() {
+    const hasStoredPng =
+      typeof guardianSignaturePng === "string" &&
+      guardianSignaturePng.startsWith("data:image/png;base64,");
+    if (guardianSignatureCanvas && guardianSignatureHasStroke) {
+      guardianSignaturePng = guardianSignatureCanvas.toDataURL("image/png");
+    } else if (!hasStoredPng) {
+      message = "La firma manuscrita del tutor es obligatoria.";
+      return;
+    }
+    guardianModalOpen = false;
   }
 
   function resetRegistrationFlow() {
@@ -322,6 +338,7 @@
       phone: "",
       email: ""
     };
+    guardianSignaturePng = "";
     guardianModalOpen = false;
     clearSignature();
     clearGuardianSignature();
@@ -343,12 +360,15 @@
   }
 
   function hasRequiredGuardianFields() {
+    const hasPng =
+      typeof guardianSignaturePng === "string" &&
+      guardianSignaturePng.startsWith("data:image/png;base64,");
     return (
       !!guardian.fullName.trim() &&
       !!guardian.relation.trim() &&
       !!guardian.phone.trim() &&
       !!guardian.email.trim() &&
-      guardianSignatureHasStroke
+      hasPng
     );
   }
 
@@ -413,7 +433,8 @@
     }
     try {
       const signatureImage = signatureCanvas.toDataURL("image/png");
-      const guardianSignatureImage = guardianSignatureCanvas?.toDataURL("image/png");
+      const guardianSignatureImage =
+        guardianSignaturePng || guardianSignatureCanvas?.toDataURL("image/png");
       waiverResult = await api("/public/waivers", "POST", {
         attractionId: selectedAttractionId,
         participant: {
@@ -1177,7 +1198,7 @@
           <canvas class="signature-pad" bind:this={guardianSignatureCanvas} use:guardianSignaturePad width="700" height="180"></canvas>
           <div class="modal-actions">
             <button type="button" on:click={clearGuardianSignature}>Limpiar firma tutor</button>
-            <button type="button" on:click={() => (guardianModalOpen = false)}>Guardar datos tutor</button>
+            <button type="button" on:click={saveGuardianModal}>Guardar datos tutor</button>
           </div>
         </div>
       </section>
