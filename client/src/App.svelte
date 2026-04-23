@@ -3,7 +3,7 @@
   import QRCode from "qrcode";
   import logoBarrancas from "../logobarrancas.png";
 
-  const API_BASE = "http://localhost:4000/api";
+  const API_BASE = "/api";
   let path = window.location.pathname;
   let query = new URLSearchParams(window.location.search);
   let loading = false;
