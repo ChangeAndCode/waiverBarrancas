@@ -49,18 +49,19 @@
   let showAdminLogin = false;
   let adminTab = "new-attraction";
 
-  let form = {
-    fullName: "",
-    birthDate: "",
-    phone: "",
-    email: "",
-    emergencyContactName: "",
-    emergencyContactPhone: "",
-    hasMedicalCondition: false,
-    consumedAlcoholOrDrugs: false,
-    acceptsSafetyRules: true,
-    acceptedText: false
-  };
+let form = {
+  fullName: "",
+  birthDate: "",
+  gender: "",
+  phone: "",
+  email: "",
+  emergencyContactName: "",
+  emergencyContactPhone: "",
+  hasMedicalCondition: false,
+  consumedAlcoholOrDrugs: false,
+  acceptsSafetyRules: true,
+  acceptedText: false
+};
   let guardian = {
     fullName: "",
     relation: "",
@@ -324,6 +325,7 @@
     form = {
       fullName: "",
       birthDate: "",
+      gender: "",
       phone: "",
       email: "",
       emergencyContactName: "",
@@ -351,6 +353,7 @@
       !!selectedAttractionId &&
       !!form.fullName.trim() &&
       !!form.birthDate &&
+      !!form.gender &&
       !!form.phone.trim() &&
       !!form.email.trim() &&
       !!form.emergencyContactName.trim() &&
@@ -451,6 +454,7 @@
         participant: {
           fullName: form.fullName,
           birthDate: form.birthDate,
+          gender: form.gender,
           phone: form.phone,
           email: form.email,
           emergencyContactName: form.emergencyContactName,
@@ -478,7 +482,7 @@
       sessionStorage.setItem("pendingWaiverPayload", JSON.stringify(pendingWaiverPayload));
 
       const checkout = await api("/public/create-checkout-session", "POST", {
-        amount: 1000,
+        amount: 3000,
         successPath: "/success",
         cancelPath: "/cancel"
       });
@@ -1226,6 +1230,13 @@ function handleCancelledPayment() {
       <input id="fullName" bind:value={form.fullName} autocomplete="name" />
       <label class="field-label" for="birthDate">Fecha de nacimiento</label>
       <input id="birthDate" type="date" bind:value={form.birthDate} />
+
+      <p class="field-label">Sexo</p>
+      <div class="radio-row" role="radiogroup" aria-label="Sexo">
+        <label><input type="radio" bind:group={form.gender} value="masculino" /> Masculino</label>
+        <label><input type="radio" bind:group={form.gender} value="femenino" /> Femenino</label>
+      </div>
+
       <label class="field-label" for="phone">Teléfono</label>
       <input id="phone" bind:value={form.phone} type="tel" autocomplete="tel" inputmode="tel" />
       <label class="field-label" for="email">Correo electrónico</label>
@@ -1415,6 +1426,19 @@ function handleCancelledPayment() {
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
+  }
+
+  .radio-row {
+    display: flex;
+    gap: 18px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .radio-row label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
   }
   button.secondary {
     background: #eee8dc;

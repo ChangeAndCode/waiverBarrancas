@@ -7,6 +7,7 @@ const waiverSchema = new mongoose.Schema(
     participant: {
       fullName: { type: String, required: true, trim: true },
       birthDate: { type: String, required: true, trim: true },
+      gender: { type: String, enum: ["masculino", "femenino"], required: true, trim: true },
       phone: { type: String, required: true, trim: true },
       email: { type: String, required: true, trim: true },
       emergencyContactName: { type: String, required: true, trim: true },

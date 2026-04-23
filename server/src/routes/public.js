@@ -49,7 +49,7 @@ export function publicRoutes({ jwtSecret }) {
 
   router.post("/create-checkout-session", async (req, res) => {
   try {
-const { amount = 1000, successPath = "/success", cancelPath = "/cancel" } = req.body;
+const { amount = 3000, successPath = "/success", cancelPath = "/cancel" } = req.body;
 
     const stripe = getStripeClient();
     const session = await stripe.checkout.sessions.create({
@@ -98,6 +98,7 @@ const { amount = 1000, successPath = "/success", cancelPath = "/cancel" } = req.
     const requiredParticipant =
       participant.fullName &&
       participant.birthDate &&
+      participant.gender && 
       participant.phone &&
       participant.email &&
       participant.emergencyContactName &&
