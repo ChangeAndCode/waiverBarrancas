@@ -479,7 +479,7 @@ let form = {
           : undefined
       };
 
-      sessionStorage.setItem("pendingWaiverPayload", JSON.stringify(pendingWaiverPayload));
+      localStorage.setItem("pendingWaiverPayload", JSON.stringify(pendingWaiverPayload));
 
       const checkout = await api("/public/create-checkout-session", "POST", {
         amount: 3000,
@@ -508,7 +508,7 @@ let form = {
   message = "";
 
   try {
-    const raw = sessionStorage.getItem("pendingWaiverPayload");
+    const raw = localStorage.getItem("pendingWaiverPayload");
     if (!raw) {
       message = "El pago se completó, pero no se encontró la información del waiver para finalizarlo.";
       return;
@@ -516,7 +516,7 @@ let form = {
 
     const payload = JSON.parse(raw);
     waiverResult = await api("/public/waivers", "POST", payload);
-    sessionStorage.removeItem("pendingWaiverPayload");
+    localStorage.removeItem("pendingWaiverPayload");
 
     await tick();
     if (!qrCanvas) await tick();
