@@ -1,6 +1,8 @@
+import { randomBytes } from "node:crypto";
 import { Router } from "express";
 import { Attraction } from "../models/Attraction.js";
 import { Waiver } from "../models/Waiver.js";
+import { WaiverDraft } from "../models/WaiverDraft.js";
 import { signWaiverToken, verifyWaiverToken } from "../lib/token.js";
 import { renderWaiverTextForSignature } from "../lib/waiverText.js";
 import { sendWaiverQrEmail } from "../lib/email.js";
@@ -47,36 +49,92 @@ export function publicRoutes({ jwtSecret }) {
     );
   });
 
+  router.post("/waiver-drafts", async (req, res) => {
+    const payload = req.body;
+    if (!payload || typeof payload !== "object") {
+      return res.status(400).json({ error: "Payload requerido." });
+    }
+    try {
+      const key = randomBytes(24).toString("hex");
+      await WaiverDraft.create({ key, payload });
+      res.status(201).json({ draftKey: key });
+    } catch (e) {
+      console.error("waiver-draft save:", e);
+      res.status(500).json({ error: "No se pudo guardar el borrador." });
+    }
+  });
+
+  router.post("/waiver-drafts/read", async (req, res) => {
+    const key = String(req.body?.draftKey || "").trim();
+    if (!/^[a-f0-9]{48}$/.test(key)) {
+      return res.status(400).json({ error: "Borrador inválido." });
+    }
+    const doc = await WaiverDraft.findOne({ key }).lean();
+    if (!doc) {
+      return res.status(404).json({ error: "Borrador no encontrado o expirado." });
+    }
+    res.json(doc.payload);
+  });
+
+  router.post("/waiver-drafts/release", async (req, res) => {
+    const key = String(req.body?.draftKey || "").trim();
+    if (!/^[a-f0-9]{48}$/.test(key)) {
+      return res.status(400).json({ error: "Borrador inválido." });
+    }
+    await WaiverDraft.deleteOne({ key });
+    res.json({ ok: true });
+  });
+
   router.post("/create-checkout-session", async (req, res) => {
-  try {
-const { amount = 3000, successPath = "/success", cancelPath = "/cancel" } = req.body;
+    try {
+      const {
+        amount = 3000,
+        successPath = "/success",
+        cancelPath = "/cancel",
+        draftKey
+      } = req.body ?? {};
 
-    const stripe = getStripeClient();
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card"],
-      mode: "payment",
-      line_items: [
-        {
-          price_data: {
-            currency: "mxn",
-            product_data: {
-              name: "Acceso a atracción"
-            },
-            unit_amount: amount
-          },
-          quantity: 1
+      const base = String(process.env.CLIENT_URL || "").replace(/\/$/, "");
+      if (!base) {
+        return res.status(500).json({ error: "Falta CLIENT_URL." });
+      }
+
+      let successUrl = `${base}${successPath}`;
+      if (draftKey) {
+        const dk = encodeURIComponent(String(draftKey).trim());
+        if (dk.length < 48) {
+          return res.status(400).json({ error: "draftKey inválido." });
         }
-      ],
-      success_url: `${process.env.CLIENT_URL}${successPath}`,
-      cancel_url: `${process.env.CLIENT_URL}${cancelPath}`
-    });
+        const join = successPath.includes("?") ? "&" : "?";
+        successUrl = `${base}${successPath}${join}draft=${dk}`;
+      }
 
-    res.json({ url: session.url });
-  } catch (error) {
-    console.error("Stripe error:", error);
-    res.status(500).json({ error: error.message || "Error creando sesión de pago" });
-  }
-});
+      const stripe = getStripeClient();
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ["card"],
+        mode: "payment",
+        line_items: [
+          {
+            price_data: {
+              currency: "mxn",
+              product_data: {
+                name: "Acceso a atracción"
+              },
+              unit_amount: amount
+            },
+            quantity: 1
+          }
+        ],
+        success_url: successUrl,
+        cancel_url: `${base}${cancelPath}`
+      });
+
+      res.json({ url: session.url });
+    } catch (error) {
+      console.error("Stripe error:", error);
+      res.status(500).json({ error: error.message || "Error creando sesión de pago" });
+    }
+  });
 
   router.post("/waivers", async (req, res) => {
     const {

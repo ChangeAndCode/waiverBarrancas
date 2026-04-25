@@ -67,7 +67,7 @@ const corsConfig = {
 
 app.use(cors(corsConfig));
 app.options("*", cors(corsConfig));
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "12mb" }));
 app.use("/branding", express.static(path.resolve(__dirname)));
 
 app.get("/api/health", (_req, res) => {

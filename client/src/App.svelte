@@ -322,6 +322,8 @@ let form = {
   function resetRegistrationFlow() {
     waiverResult = null;
     message = "";
+    localStorage.removeItem("pendingWaiverDraftKey");
+    localStorage.removeItem("pendingWaiverPayload");
     form = {
       fullName: "",
       birthDate: "",
@@ -479,12 +481,14 @@ let form = {
           : undefined
       };
 
-      localStorage.setItem("pendingWaiverPayload", JSON.stringify(pendingWaiverPayload));
+      const { draftKey } = await api("/public/waiver-drafts", "POST", pendingWaiverPayload);
+      localStorage.setItem("pendingWaiverDraftKey", draftKey);
 
       const checkout = await api("/public/create-checkout-session", "POST", {
         amount: 3000,
         successPath: "/success",
-        cancelPath: "/cancel"
+        cancelPath: "/cancel",
+        draftKey
       });
 
       if (!checkout?.url) {
@@ -508,15 +512,29 @@ let form = {
   message = "";
 
   try {
-    const raw = localStorage.getItem("pendingWaiverPayload");
-    if (!raw) {
-      message = "El pago se completó, pero no se encontró la información del waiver para finalizarlo.";
-      return;
+    const draftKey = query.get("draft") || localStorage.getItem("pendingWaiverDraftKey");
+    let payload;
+    if (draftKey) {
+      payload = await api("/public/waiver-drafts/read", "POST", { draftKey });
+    } else {
+      const raw = localStorage.getItem("pendingWaiverPayload");
+      if (!raw) {
+        message = "El pago se completó, pero no se encontró la información del waiver para finalizarlo.";
+        return;
+      }
+      payload = JSON.parse(raw);
+      localStorage.removeItem("pendingWaiverPayload");
     }
 
-    const payload = JSON.parse(raw);
     waiverResult = await api("/public/waivers", "POST", payload);
-    localStorage.removeItem("pendingWaiverPayload");
+    if (draftKey) {
+      try {
+        await api("/public/waiver-drafts/release", "POST", { draftKey });
+      } catch {
+        /* el borrador caduca solo; no bloquear al usuario */
+      }
+      localStorage.removeItem("pendingWaiverDraftKey");
+    }
 
     await tick();
     if (!qrCanvas) await tick();
@@ -539,8 +557,18 @@ let form = {
   }
 }
 
-function handleCancelledPayment() {
+async function handleCancelledPayment() {
   message = "El pago fue cancelado. Puedes revisar tus datos e intentarlo de nuevo.";
+  const dk = localStorage.getItem("pendingWaiverDraftKey");
+  if (dk) {
+    try {
+      await api("/public/waiver-drafts/release", "POST", { draftKey: dk });
+    } catch {
+      /* ignorar */
+    }
+  }
+  localStorage.removeItem("pendingWaiverDraftKey");
+  localStorage.removeItem("pendingWaiverPayload");
   history.replaceState({}, "", "/");
   path = window.location.pathname;
   query = new URLSearchParams(window.location.search);
@@ -902,7 +930,7 @@ function handleCancelledPayment() {
     }
     if (path === "/cancel") {
       await loadPublicAttractions();
-      handleCancelledPayment();
+      await handleCancelledPayment();
       return;
     }
     await loadPublicAttractions();
