@@ -37,4 +37,8 @@ const waiverSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+waiverSchema.index({ createdAt: -1 });
+waiverSchema.index({ attractionId: 1, createdAt: -1 });
+waiverSchema.index({ status: 1, createdAt: -1 });
+
 export const Waiver = mongoose.model("Waiver", waiverSchema);

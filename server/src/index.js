@@ -70,6 +70,33 @@ app.options("*", cors(corsConfig));
 app.use(express.json({ limit: "12mb" }));
 app.use("/branding", express.static(path.resolve(__dirname)));
 
+const latencyTrackedRoutes = new Set([
+  "POST /api/public/waivers",
+  "POST /api/public/create-checkout-session",
+  "GET /api/reports/validate/:token"
+]);
+
+function latencyRouteKey(req) {
+  if (req.method === "GET" && /^\/api\/reports\/validate\/[^/]+$/.test(req.path)) {
+    return "GET /api/reports/validate/:token";
+  }
+  return `${req.method} ${req.path}`;
+}
+
+app.use((req, res, next) => {
+  const routeKey = latencyRouteKey(req);
+  if (!latencyTrackedRoutes.has(routeKey)) return next();
+
+  const startedAt = process.hrtime.bigint();
+  res.on("finish", () => {
+    const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+    console.log(
+      `[latency] route="${routeKey}" status=${res.statusCode} ms=${elapsedMs.toFixed(1)}`
+    );
+  });
+  next();
+});
+
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
 });
