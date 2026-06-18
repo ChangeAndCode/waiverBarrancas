@@ -5,7 +5,8 @@ import { Waiver } from "../models/Waiver.js";
 import { WaiverDraft } from "../models/WaiverDraft.js";
 import { signWaiverToken, verifyWaiverToken } from "../lib/token.js";
 import { renderWaiverTextForSignature } from "../lib/waiverText.js";
-import { sendWaiverQrEmail } from "../lib/email.js";
+import { canSendEmails, sendWaiverQrEmail } from "../lib/email.js";
+import { nowMs, perfLog } from "../lib/perf.js";
 import Stripe from "stripe";
 
 function getStripeClient() {
@@ -39,7 +40,12 @@ export function publicRoutes({ jwtSecret }) {
   const router = Router();
 
   router.get("/attractions", async (_req, res) => {
+    const startedAt = nowMs();
     const items = await Attraction.find({ active: true }).sort({ createdAt: -1 }).lean();
+    perfLog("db_query", {
+      operation: "attraction_list_active",
+      durationMs: nowMs() - startedAt
+    });
     const previewDate = new Date();
     res.json(
       items.map((item) => ({
@@ -144,7 +150,8 @@ export function publicRoutes({ jwtSecret }) {
       acceptedText,
       signatureName,
       signatureImage,
-      guardian
+      guardian,
+      witness
     } = req.body ?? {};
 
     if (!attractionId || !participant || !answers || acceptedText !== true || !signatureName || !signatureImage) {
@@ -163,6 +170,25 @@ export function publicRoutes({ jwtSecret }) {
       participant.emergencyContactPhone;
     if (!requiredParticipant) {
       return res.status(400).json({ error: "Todos los campos del participante son obligatorios." });
+    }
+    const extendedParticipant =
+      participant.nationality &&
+      participant.cityState &&
+      participant.medications &&
+      participant.treatingPhysician &&
+      participant.physicianPhone &&
+      participant.emergencyContactRelationship &&
+      participant.familyReference2Name &&
+      participant.familyReference2Relationship &&
+      participant.familyReference2Phone;
+    if (!extendedParticipant) {
+      return res.status(400).json({ error: "Faltan campos adicionales del participante." });
+    }
+    const witnessValid =
+      witness?.signatureImage &&
+      String(witness.signatureImage).startsWith("data:image/png;base64,");
+    if (!witnessValid) {
+      return res.status(400).json({ error: "La firma del testigo es obligatoria." });
     }
     if (answers.acceptsSafetyRules !== true) {
       return res.status(400).json({ error: "Debes aceptar reglas de seguridad." });
@@ -186,10 +212,16 @@ export function publicRoutes({ jwtSecret }) {
       }
     }
 
+    const attractionQueryAt = nowMs();
     const attraction = await Attraction.findOne({ _id: attractionId, active: true }).lean();
+    perfLog("db_query", {
+      operation: "attraction_find_one_active",
+      durationMs: nowMs() - attractionQueryAt
+    });
     if (!attraction) return res.status(404).json({ error: "Atracción no encontrada." });
 
     const signedAt = new Date();
+    const createWaiverAt = nowMs();
     const waiver = await Waiver.create({
       attractionId: attraction._id,
       attractionName: attraction.name,
@@ -200,30 +232,19 @@ export function publicRoutes({ jwtSecret }) {
       acceptedText,
       signatureName,
       signatureImage,
+      witness,
       waiverTextSnapshot: renderWaiverTextForSignature(attraction.waiverText, signedAt)
+    });
+    perfLog("db_query", {
+      operation: "waiver_create",
+      durationMs: nowMs() - createWaiverAt
     });
 
     const token = signWaiverToken(waiver._id.toString(), jwtSecret);
     const qrUrl = `${baseUrlFromRequest(req)}/check/${token}`;
     const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=420x420&data=${encodeURIComponent(qrUrl)}`;
     const logoUrl = `${baseUrlFromRequest(req)}/branding/logobarrancas.png`;
-    let emailSent = false;
-
-    try {
-      const result = await sendWaiverQrEmail({
-        to: participant.email,
-        participantName: participant.fullName,
-        attractionName: attraction.name,
-        waiverId: waiver._id.toString(),
-        signedAt,
-        qrUrl,
-        qrImageUrl,
-        logoUrl
-      });
-      emailSent = Boolean(result?.sent);
-    } catch (error) {
-      console.error("No se pudo enviar correo con Resend:", error.message);
-    }
+    const emailSent = canSendEmails();
 
     res.status(201).json({
       waiverId: waiver._id,
@@ -232,6 +253,37 @@ export function publicRoutes({ jwtSecret }) {
       emailSent,
       signedAt: waiver.createdAt
     });
+
+    // Enviar correo fuera del ciclo de respuesta para reducir latencia en picos.
+    if (emailSent) {
+      setImmediate(async () => {
+        const emailAt = nowMs();
+        try {
+          await sendWaiverQrEmail({
+            to: participant.email,
+            participantName: participant.fullName,
+            attractionName: attraction.name,
+            waiverId: waiver._id.toString(),
+            signedAt,
+            qrUrl,
+            qrImageUrl,
+            logoUrl
+          });
+          perfLog("async_email", {
+            provider: "resend",
+            ok: true,
+            durationMs: nowMs() - emailAt
+          });
+        } catch (error) {
+          perfLog("async_email", {
+            provider: "resend",
+            ok: false,
+            durationMs: nowMs() - emailAt
+          });
+          console.error("No se pudo enviar correo con Resend:", error.message);
+        }
+      });
+    }
   });
 
   router.get("/check/:token", async (req, res) => {

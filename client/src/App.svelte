@@ -14,6 +14,8 @@
   let guardianSignatureCanvas;
   let guardianSignatureHasStroke = false;
   let guardianModalOpen = false;
+  let witnessSignatureCanvas;
+  let witnessSignatureHasStroke = false;
 
   let authToken = localStorage.getItem("authToken") || "";
   let authUser = JSON.parse(localStorage.getItem("authUser") || "null");
@@ -55,8 +57,17 @@ let form = {
   gender: "",
   phone: "",
   email: "",
+  nationality: "",
+  cityState: "",
+  medications: "",
+  treatingPhysician: "",
+  physicianPhone: "",
   emergencyContactName: "",
+  emergencyContactRelationship: "",
   emergencyContactPhone: "",
+  familyReference2Name: "",
+  familyReference2Relationship: "",
+  familyReference2Phone: "",
   hasMedicalCondition: false,
   consumedAlcoholOrDrugs: false,
   acceptsSafetyRules: true,
@@ -306,6 +317,116 @@ let form = {
     ctx.clearRect(0, 0, guardianSignatureCanvas.width, guardianSignatureCanvas.height);
   }
 
+  function witnessSignaturePad(node) {
+    const ctx = node.getContext("2d");
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "#1f4a3b";
+
+    let drawing = false;
+    let activeTouchId = null;
+    const docTouchOpts = { capture: true, passive: false };
+
+    function pointFromClient(clientX, clientY) {
+      const rect = node.getBoundingClientRect();
+      const sx = node.width / rect.width;
+      const sy = node.height / rect.height;
+      return { x: (clientX - rect.left) * sx, y: (clientY - rect.top) * sy };
+    }
+
+    function touchById(list, id) {
+      for (let i = 0; i < list.length; i++) {
+        if (list[i].identifier === id) return list[i];
+      }
+      return null;
+    }
+
+    function detachGlobalTouch() {
+      document.removeEventListener("touchmove", onDocumentTouchMove, docTouchOpts);
+      document.removeEventListener("touchend", onDocumentTouchEnd, { capture: true });
+      document.removeEventListener("touchcancel", onDocumentTouchEnd, { capture: true });
+      activeTouchId = null;
+      drawing = false;
+    }
+
+    function onDocumentTouchMove(event) {
+      if (!drawing || activeTouchId === null) return;
+      const t = touchById(event.touches, activeTouchId);
+      if (!t) return;
+      event.preventDefault();
+      const p = pointFromClient(t.clientX, t.clientY);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+      witnessSignatureHasStroke = true;
+    }
+
+    function onDocumentTouchEnd(event) {
+      if (!drawing || activeTouchId === null) return;
+      const ended = [...(event.changedTouches || [])].some((ch) => ch.identifier === activeTouchId);
+      if (!ended) return;
+      event.preventDefault();
+      detachGlobalTouch();
+    }
+
+    function startMouse(event) {
+      event.preventDefault();
+      drawing = true;
+      const p = pointFromClient(event.clientX, event.clientY);
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+    }
+
+    function moveMouse(event) {
+      if (!drawing) return;
+      event.preventDefault();
+      const p = pointFromClient(event.clientX, event.clientY);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+      witnessSignatureHasStroke = true;
+    }
+
+    function endMouse() {
+      drawing = false;
+    }
+
+    function startTouch(event) {
+      event.preventDefault();
+      if (drawing && activeTouchId !== null) return;
+      const t = event.changedTouches[0];
+      if (!t) return;
+      activeTouchId = t.identifier;
+      drawing = true;
+      document.addEventListener("touchmove", onDocumentTouchMove, docTouchOpts);
+      document.addEventListener("touchend", onDocumentTouchEnd, { capture: true });
+      document.addEventListener("touchcancel", onDocumentTouchEnd, { capture: true });
+      const p = pointFromClient(t.clientX, t.clientY);
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+    }
+
+    node.addEventListener("mousedown", startMouse);
+    node.addEventListener("mousemove", moveMouse);
+    window.addEventListener("mouseup", endMouse);
+    node.addEventListener("touchstart", startTouch, { passive: false });
+
+    return {
+      destroy() {
+        detachGlobalTouch();
+        node.removeEventListener("mousedown", startMouse);
+        node.removeEventListener("mousemove", moveMouse);
+        window.removeEventListener("mouseup", endMouse);
+        node.removeEventListener("touchstart", startTouch);
+      }
+    };
+  }
+
+  function clearWitnessSignature() {
+    witnessSignatureHasStroke = false;
+    if (!witnessSignatureCanvas) return;
+    const ctx = witnessSignatureCanvas.getContext("2d");
+    ctx.clearRect(0, 0, witnessSignatureCanvas.width, witnessSignatureCanvas.height);
+  }
+
   function saveGuardianModal() {
     const hasStoredPng =
       typeof guardianSignaturePng === "string" &&
@@ -330,8 +451,17 @@ let form = {
       gender: "",
       phone: "",
       email: "",
+      nationality: "",
+      cityState: "",
+      medications: "",
+      treatingPhysician: "",
+      physicianPhone: "",
       emergencyContactName: "",
+      emergencyContactRelationship: "",
       emergencyContactPhone: "",
+      familyReference2Name: "",
+      familyReference2Relationship: "",
+      familyReference2Phone: "",
       hasMedicalCondition: false,
       consumedAlcoholOrDrugs: false,
       acceptsSafetyRules: true,
@@ -347,6 +477,7 @@ let form = {
     guardianModalOpen = false;
     clearSignature();
     clearGuardianSignature();
+    clearWitnessSignature();
     window.location.reload();
   }
 
@@ -358,8 +489,17 @@ let form = {
       !!form.gender &&
       !!form.phone.trim() &&
       !!form.email.trim() &&
+      !!form.nationality.trim() &&
+      !!form.cityState.trim() &&
+      !!form.medications.trim() &&
+      !!form.treatingPhysician.trim() &&
+      !!form.physicianPhone.trim() &&
       !!form.emergencyContactName.trim() &&
+      !!form.emergencyContactRelationship.trim() &&
       !!form.emergencyContactPhone.trim() &&
+      !!form.familyReference2Name.trim() &&
+      !!form.familyReference2Relationship.trim() &&
+      !!form.familyReference2Phone.trim() &&
       form.acceptedText === true &&
       form.acceptsSafetyRules === true
     );
@@ -439,6 +579,12 @@ let form = {
       message = "La firma manuscrita es obligatoria.";
       return;
     }
+    if (!witnessSignatureHasStroke || !witnessSignatureCanvas) {
+      waiverSubmitInFlight = false;
+      loading = false;
+      message = "La firma del testigo es obligatoria.";
+      return;
+    }
     if (isMinor && !hasRequiredGuardianFields()) {
       waiverSubmitInFlight = false;
       loading = false;
@@ -448,6 +594,7 @@ let form = {
     }
     try {
       const signatureImage = signatureCanvas.toDataURL("image/png");
+      const witnessSignatureImage = witnessSignatureCanvas.toDataURL("image/png");
       const guardianSignatureImage =
         guardianSignaturePng || guardianSignatureCanvas?.toDataURL("image/png");
 
@@ -459,8 +606,17 @@ let form = {
           gender: form.gender,
           phone: form.phone,
           email: form.email,
+          nationality: form.nationality,
+          cityState: form.cityState,
+          medications: form.medications,
+          treatingPhysician: form.treatingPhysician,
+          physicianPhone: form.physicianPhone,
           emergencyContactName: form.emergencyContactName,
-          emergencyContactPhone: form.emergencyContactPhone
+          emergencyContactRelationship: form.emergencyContactRelationship,
+          emergencyContactPhone: form.emergencyContactPhone,
+          familyReference2Name: form.familyReference2Name,
+          familyReference2Relationship: form.familyReference2Relationship,
+          familyReference2Phone: form.familyReference2Phone
         },
         answers: {
           hasMedicalCondition: form.hasMedicalCondition,
@@ -470,6 +626,7 @@ let form = {
         acceptedText: form.acceptedText,
         signatureName: form.fullName,
         signatureImage,
+        witness: { signatureImage: witnessSignatureImage },
         guardian: isMinor
           ? {
               fullName: guardian.fullName,
@@ -1269,10 +1426,29 @@ async function handleCancelledPayment() {
       <input id="phone" bind:value={form.phone} type="tel" autocomplete="tel" inputmode="tel" />
       <label class="field-label" for="email">Correo electrónico</label>
       <input id="email" bind:value={form.email} type="email" autocomplete="email" inputmode="email" />
-      <label class="field-label" for="emergencyName">Nombre del contacto de emergencia</label>
+      <label class="field-label" for="nationality">Nacionalidad</label>
+      <input id="nationality" bind:value={form.nationality} autocomplete="country-name" />
+      <label class="field-label" for="cityState">Ciudad / Estado</label>
+      <input id="cityState" bind:value={form.cityState} autocomplete="address-level2" />
+      <label class="field-label" for="medications">¿Toma medicamentos? / Dosis</label>
+      <input id="medications" bind:value={form.medications} placeholder="Ej. No, o nombre y dosis" />
+      <label class="field-label" for="treatingPhysician">Médico tratante</label>
+      <input id="treatingPhysician" bind:value={form.treatingPhysician} placeholder="Nombre del médico" />
+      <label class="field-label" for="physicianPhone">Teléfono del médico</label>
+      <input id="physicianPhone" bind:value={form.physicianPhone} type="tel" inputmode="tel" />
+      <h3>Referencias familiares</h3>
+      <label class="field-label" for="emergencyName">Referencia 1 — Nombre</label>
       <input id="emergencyName" bind:value={form.emergencyContactName} autocomplete="name" />
-      <label class="field-label" for="emergencyPhone">Teléfono del contacto de emergencia</label>
+      <label class="field-label" for="emergencyRelationship">Referencia 1 — Parentesco</label>
+      <input id="emergencyRelationship" bind:value={form.emergencyContactRelationship} placeholder="Ej. padre, madre, cónyuge" />
+      <label class="field-label" for="emergencyPhone">Referencia 1 — Teléfono</label>
       <input id="emergencyPhone" bind:value={form.emergencyContactPhone} type="tel" autocomplete="tel" inputmode="tel" />
+      <label class="field-label" for="familyRef2Name">Referencia 2 — Nombre</label>
+      <input id="familyRef2Name" bind:value={form.familyReference2Name} autocomplete="name" />
+      <label class="field-label" for="familyRef2Relationship">Referencia 2 — Parentesco</label>
+      <input id="familyRef2Relationship" bind:value={form.familyReference2Relationship} placeholder="Ej. hermano, tío" />
+      <label class="field-label" for="familyRef2Phone">Referencia 2 — Teléfono</label>
+      <input id="familyRef2Phone" bind:value={form.familyReference2Phone} type="tel" inputmode="tel" />
       {#if isMinor}
         <p class="bad">Participante menor de edad: se requiere tutor y firma manuscrita del tutor.</p>
         <button type="button" on:click={() => (guardianModalOpen = true)}>
@@ -1287,9 +1463,12 @@ async function handleCancelledPayment() {
       <h3>Carta responsiva</h3>
       <p class="waiver">{selectedAttraction?.waiverText || ""}</p>
       <label><input type="checkbox" bind:checked={form.acceptedText} /> Leí y acepto la carta responsiva</label>
-      <p><b>Firma manuscrita</b> (usa mouse, dedo o stylus)</p>
+      <p><b>Firma manuscrita del participante</b> (usa mouse, dedo o stylus)</p>
       <canvas class="signature-pad" bind:this={signatureCanvas} use:signaturePad width="700" height="180"></canvas>
-      <button type="button" on:click={clearSignature}>Limpiar firma</button>
+      <button type="button" on:click={clearSignature}>Limpiar firma participante</button>
+      <p><b>Firma del testigo</b> (usa mouse, dedo o stylus)</p>
+      <canvas class="signature-pad" bind:this={witnessSignatureCanvas} use:witnessSignaturePad width="700" height="180"></canvas>
+      <button type="button" on:click={clearWitnessSignature}>Limpiar firma testigo</button>
       <button on:click={submitWaiver} disabled={loading}>{loading ? "Redirigiendo al pago..." : "Firmar y pagar"}</button>
     </section>
 

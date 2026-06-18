@@ -2,6 +2,7 @@ import { Router } from "express";
 import { requireAuth, requireRoles } from "../lib/auth.js";
 import { Waiver } from "../models/Waiver.js";
 import { verifyWaiverToken } from "../lib/token.js";
+import { nowMs, perfLog } from "../lib/perf.js";
 
 export function reportRoutes({ jwtSecret }) {
   const router = Router();
@@ -12,7 +13,12 @@ export function reportRoutes({ jwtSecret }) {
       const payload = verifyWaiverToken(req.params.token, jwtSecret);
       const waiverId = payload.waiverId;
 
+      const firstLookupAt = nowMs();
       const waiver = await Waiver.findById(waiverId).lean();
+      perfLog("db_query", {
+        operation: "reports_validate_find_by_id",
+        durationMs: nowMs() - firstLookupAt
+      });
       if (!waiver || waiver.status !== "signed") {
         return res.status(404).json({ valid: false, error: "Waiver inválido o revocado." });
       }
@@ -27,14 +33,24 @@ export function reportRoutes({ jwtSecret }) {
         });
       }
 
+      const consumeAt = nowMs();
       const consumed = await Waiver.findOneAndUpdate(
         { _id: waiverId, status: "signed", qrConsumedAt: null },
         { $set: { qrConsumedAt: new Date() } },
         { new: true }
       ).lean();
+      perfLog("db_query", {
+        operation: "reports_validate_consume_qr",
+        durationMs: nowMs() - consumeAt
+      });
 
       if (!consumed) {
+        const secondLookupAt = nowMs();
         const again = await Waiver.findById(waiverId).lean();
+        perfLog("db_query", {
+          operation: "reports_validate_find_by_id_retry",
+          durationMs: nowMs() - secondLookupAt
+        });
         if (!again || again.status !== "signed") {
           return res.status(404).json({ valid: false, error: "Waiver inválido o revocado." });
         }
@@ -72,7 +88,12 @@ export function reportRoutes({ jwtSecret }) {
       if (req.query.to) query.createdAt.$lte = new Date(req.query.to);
     }
 
+    const waiversAt = nowMs();
     const waivers = await Waiver.find(query).sort({ createdAt: -1 }).limit(300).lean();
+    perfLog("db_query", {
+      operation: "reports_waivers_list",
+      durationMs: nowMs() - waiversAt
+    });
     const total = waivers.length;
     const signed = waivers.filter((w) => w.status === "signed").length;
     const revoked = waivers.filter((w) => w.status === "revoked").length;

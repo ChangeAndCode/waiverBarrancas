@@ -11,7 +11,16 @@ const waiverSchema = new mongoose.Schema(
       phone: { type: String, required: true, trim: true },
       email: { type: String, required: true, trim: true },
       emergencyContactName: { type: String, required: true, trim: true },
-      emergencyContactPhone: { type: String, required: true, trim: true }
+      emergencyContactPhone: { type: String, required: true, trim: true },
+      nationality: { type: String, trim: true, default: "" },
+      cityState: { type: String, trim: true, default: "" },
+      medications: { type: String, trim: true, default: "" },
+      treatingPhysician: { type: String, trim: true, default: "" },
+      physicianPhone: { type: String, trim: true, default: "" },
+      emergencyContactRelationship: { type: String, trim: true, default: "" },
+      familyReference2Name: { type: String, trim: true, default: "" },
+      familyReference2Relationship: { type: String, trim: true, default: "" },
+      familyReference2Phone: { type: String, trim: true, default: "" }
     },
     isMinor: { type: Boolean, default: false },
     guardian: {
@@ -29,6 +38,9 @@ const waiverSchema = new mongoose.Schema(
     acceptedText: { type: Boolean, required: true },
     signatureName: { type: String, required: true, trim: true },
     signatureImage: { type: String, required: true },
+    witness: {
+      signatureImage: { type: String, default: "" }
+    },
     waiverTextSnapshot: { type: String, required: true },
     /** Primera validación por staff (GET /reports/validate); el QR deja de ser válido después. */
     qrConsumedAt: { type: Date, default: null },

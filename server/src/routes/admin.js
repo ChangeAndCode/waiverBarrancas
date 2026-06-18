@@ -4,10 +4,11 @@ import { Attraction } from "../models/Attraction.js";
 import { Waiver } from "../models/Waiver.js";
 import { User } from "../models/User.js";
 import { requireAuth, requireRoles } from "../lib/auth.js";
+import { nowMs, perfLog } from "../lib/perf.js";
 
 const MAX_CSV_ROWS = 50000;
 const waiverSelectLean =
-  "-signatureImage -guardian.signatureImage -waiverTextSnapshot";
+  "-signatureImage -guardian.signatureImage -witness.signatureImage -waiverTextSnapshot";
 
 function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -51,6 +52,15 @@ function mapWaiverRow(w) {
     birthDate: w.participant?.birthDate,
     emergencyContactName: w.participant?.emergencyContactName,
     emergencyContactPhone: w.participant?.emergencyContactPhone,
+    nationality: w.participant?.nationality || "",
+    cityState: w.participant?.cityState || "",
+    medications: w.participant?.medications || "",
+    treatingPhysician: w.participant?.treatingPhysician || "",
+    physicianPhone: w.participant?.physicianPhone || "",
+    emergencyContactRelationship: w.participant?.emergencyContactRelationship || "",
+    familyReference2Name: w.participant?.familyReference2Name || "",
+    familyReference2Relationship: w.participant?.familyReference2Relationship || "",
+    familyReference2Phone: w.participant?.familyReference2Phone || "",
     isMinor: w.isMinor,
     guardianFullName: w.guardian?.fullName || "",
     guardianRelation: w.guardian?.relation || "",
@@ -120,25 +130,40 @@ export function adminRoutes({ jwtSecret }) {
     const pageSizeRaw = parseInt(String(req.query.pageSize || "25"), 10) || 25;
     const pageSize = Math.min(200, Math.max(1, pageSizeRaw));
 
+    const countAt = nowMs();
     const total = await Waiver.countDocuments(filter);
+    perfLog("db_query", {
+      operation: "admin_reports_waivers_count",
+      durationMs: nowMs() - countAt
+    });
     let signedCount = 0;
     let revokedCount = 0;
     if (filter.status) {
       signedCount = filter.status === "signed" ? total : 0;
       revokedCount = filter.status === "revoked" ? total : 0;
     } else {
+      const statusCountsAt = nowMs();
       [signedCount, revokedCount] = await Promise.all([
         Waiver.countDocuments({ ...filter, status: "signed" }),
         Waiver.countDocuments({ ...filter, status: "revoked" })
       ]);
+      perfLog("db_query", {
+        operation: "admin_reports_waivers_status_counts",
+        durationMs: nowMs() - statusCountsAt
+      });
     }
 
+    const listAt = nowMs();
     const raw = await Waiver.find(filter)
       .select(waiverSelectLean)
       .sort({ createdAt: -1 })
       .skip((page - 1) * pageSize)
       .limit(pageSize)
       .lean();
+    perfLog("db_query", {
+      operation: "admin_reports_waivers_list",
+      durationMs: nowMs() - listAt
+    });
 
     res.json({
       summary: { total, signed: signedCount, revoked: revokedCount },
@@ -151,11 +176,16 @@ export function adminRoutes({ jwtSecret }) {
 
   router.get("/reports/waivers/export.csv", async (req, res) => {
     const filter = waiverAdminReportFilter(req);
+    const exportAt = nowMs();
     const rows = await Waiver.find(filter)
       .select(waiverSelectLean)
       .sort({ createdAt: -1 })
       .limit(MAX_CSV_ROWS)
       .lean();
+    perfLog("db_query", {
+      operation: "admin_reports_waivers_export",
+      durationMs: nowMs() - exportAt
+    });
 
     const headers = [
       "id",
@@ -167,6 +197,15 @@ export function adminRoutes({ jwtSecret }) {
       "birthDate",
       "emergencyContactName",
       "emergencyContactPhone",
+      "nationality",
+      "cityState",
+      "medications",
+      "treatingPhysician",
+      "physicianPhone",
+      "emergencyContactRelationship",
+      "familyReference2Name",
+      "familyReference2Relationship",
+      "familyReference2Phone",
       "isMinor",
       "guardianFullName",
       "guardianRelation",
@@ -193,6 +232,15 @@ export function adminRoutes({ jwtSecret }) {
           csvCell(r.birthDate),
           csvCell(r.emergencyContactName),
           csvCell(r.emergencyContactPhone),
+          csvCell(r.nationality),
+          csvCell(r.cityState),
+          csvCell(r.medications),
+          csvCell(r.treatingPhysician),
+          csvCell(r.physicianPhone),
+          csvCell(r.emergencyContactRelationship),
+          csvCell(r.familyReference2Name),
+          csvCell(r.familyReference2Relationship),
+          csvCell(r.familyReference2Phone),
           csvCell(r.isMinor),
           csvCell(r.guardianFullName),
           csvCell(r.guardianRelation),
