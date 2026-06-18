@@ -1405,122 +1405,147 @@ async function handleCancelledPayment() {
     <section class="card waiver-form">
       <h2>Registro de Waiver</h2>
       {#if message}<p class="bad">{message}</p>{/if}
-      <div class="field-group">
-        <label class="field-label" for="atraccion">Atracción</label>
-        <select id="atraccion" bind:value={selectedAttractionId} on:change={() => (selectedAttraction = attractions.find((a) => a._id === selectedAttractionId))}>
-          {#each attractions as a}
-            <option value={a._id}>{a.name}</option>
-          {/each}
-        </select>
-      </div>
-      <div class="field-group">
-        <label class="field-label" for="fullName">Nombre completo (como en tu INE)</label>
-        <input id="fullName" bind:value={form.fullName} autocomplete="name" />
-      </div>
-      <div class="form-grid-2">
-        <div class="field-group">
-          <label class="field-label" for="birthDate">Fecha de nacimiento</label>
-          <input id="birthDate" type="date" bind:value={form.birthDate} />
-        </div>
-        <div class="field-group">
-          <p class="field-label">Sexo</p>
-          <div class="radio-row" role="radiogroup" aria-label="Sexo">
-            <label><input type="radio" bind:group={form.gender} value="masculino" /> Masculino</label>
-            <label><input type="radio" bind:group={form.gender} value="femenino" /> Femenino</label>
-          </div>
-        </div>
-      </div>
-      <div class="form-grid-2">
-        <div class="field-group">
-          <label class="field-label" for="phone">Teléfono</label>
-          <input id="phone" bind:value={form.phone} type="tel" autocomplete="tel" inputmode="tel" />
-        </div>
-        <div class="field-group">
-          <label class="field-label" for="email">Correo electrónico</label>
-          <input id="email" bind:value={form.email} type="email" autocomplete="email" inputmode="email" />
-        </div>
-      </div>
-      <div class="form-grid-2">
-        <div class="field-group">
-          <label class="field-label" for="nationality">Nacionalidad</label>
-          <input id="nationality" bind:value={form.nationality} autocomplete="country-name" />
-        </div>
-        <div class="field-group">
-          <label class="field-label" for="cityState">Ciudad / Estado</label>
-          <input id="cityState" bind:value={form.cityState} autocomplete="address-level2" />
-        </div>
-      </div>
-      <div class="field-group">
-        <label class="field-label" for="medications">¿Toma medicamentos? / Dosis</label>
-        <input id="medications" bind:value={form.medications} placeholder="Ej. No, o nombre y dosis" />
-      </div>
-      <div class="form-grid-2">
-        <div class="field-group">
-          <label class="field-label" for="treatingPhysician">Médico tratante</label>
-          <input id="treatingPhysician" bind:value={form.treatingPhysician} placeholder="Nombre del médico" />
-        </div>
-        <div class="field-group">
-          <label class="field-label" for="physicianPhone">Teléfono del médico</label>
-          <input id="physicianPhone" bind:value={form.physicianPhone} type="tel" inputmode="tel" />
-        </div>
-      </div>
-      <h3 class="form-section-title">Referencias familiares</h3>
-      <div class="form-grid-2 family-refs-grid">
-        <div class="family-ref-col">
+      <div class="form-section">
+        <h3 class="form-section-title">Datos del participante</h3>
+        <div class="form-section-body">
           <div class="field-group">
-            <label class="field-label" for="emergencyName">Referencia 1 — Nombre</label>
-            <input id="emergencyName" bind:value={form.emergencyContactName} autocomplete="name" />
+            <label class="field-label" for="atraccion">Atracción</label>
+            <select id="atraccion" bind:value={selectedAttractionId} on:change={() => (selectedAttraction = attractions.find((a) => a._id === selectedAttractionId))}>
+              {#each attractions as a}
+                <option value={a._id}>{a.name}</option>
+              {/each}
+            </select>
           </div>
           <div class="field-group">
-            <label class="field-label" for="emergencyRelationship">Referencia 1 — Parentesco</label>
-            <input id="emergencyRelationship" bind:value={form.emergencyContactRelationship} placeholder="Ej. padre, madre, cónyuge" />
+            <label class="field-label" for="fullName">Nombre completo (como en tu INE)</label>
+            <input id="fullName" bind:value={form.fullName} autocomplete="name" />
+          </div>
+          <div class="form-grid-2">
+            <div class="field-group">
+              <label class="field-label" for="birthDate">Fecha de nacimiento</label>
+              <input id="birthDate" type="date" bind:value={form.birthDate} />
+            </div>
+            <div class="field-group">
+              <p class="field-label">Sexo</p>
+              <div class="radio-row" role="radiogroup" aria-label="Sexo">
+                <label><input type="radio" bind:group={form.gender} value="masculino" /> Masculino</label>
+                <label><input type="radio" bind:group={form.gender} value="femenino" /> Femenino</label>
+              </div>
+            </div>
+          </div>
+          <div class="form-grid-2">
+            <div class="field-group">
+              <label class="field-label" for="phone">Teléfono</label>
+              <input id="phone" bind:value={form.phone} type="tel" autocomplete="tel" inputmode="tel" />
+            </div>
+            <div class="field-group">
+              <label class="field-label" for="email">Correo electrónico</label>
+              <input id="email" bind:value={form.email} type="email" autocomplete="email" inputmode="email" />
+            </div>
+          </div>
+          <div class="form-grid-2">
+            <div class="field-group">
+              <label class="field-label" for="nationality">Nacionalidad</label>
+              <input id="nationality" bind:value={form.nationality} autocomplete="country-name" />
+            </div>
+            <div class="field-group">
+              <label class="field-label" for="cityState">Ciudad / Estado</label>
+              <input id="cityState" bind:value={form.cityState} autocomplete="address-level2" />
+            </div>
           </div>
           <div class="field-group">
-            <label class="field-label" for="emergencyPhone">Referencia 1 — Teléfono</label>
-            <input id="emergencyPhone" bind:value={form.emergencyContactPhone} type="tel" autocomplete="tel" inputmode="tel" />
+            <label class="field-label" for="medications">¿Toma medicamentos? / Dosis</label>
+            <input id="medications" bind:value={form.medications} placeholder="Ej. No, o nombre y dosis" />
+          </div>
+          <div class="form-grid-2">
+            <div class="field-group">
+              <label class="field-label" for="treatingPhysician">Médico tratante</label>
+              <input id="treatingPhysician" bind:value={form.treatingPhysician} placeholder="Nombre del médico" />
+            </div>
+            <div class="field-group">
+              <label class="field-label" for="physicianPhone">Teléfono del médico</label>
+              <input id="physicianPhone" bind:value={form.physicianPhone} type="tel" inputmode="tel" />
+            </div>
           </div>
         </div>
-        <div class="family-ref-col">
-          <div class="field-group">
-            <label class="field-label" for="familyRef2Name">Referencia 2 — Nombre</label>
-            <input id="familyRef2Name" bind:value={form.familyReference2Name} autocomplete="name" />
-          </div>
-          <div class="field-group">
-            <label class="field-label" for="familyRef2Relationship">Referencia 2 — Parentesco</label>
-            <input id="familyRef2Relationship" bind:value={form.familyReference2Relationship} placeholder="Ej. hermano, tío" />
-          </div>
-          <div class="field-group">
-            <label class="field-label" for="familyRef2Phone">Referencia 2 — Teléfono</label>
-            <input id="familyRef2Phone" bind:value={form.familyReference2Phone} type="tel" inputmode="tel" />
-          </div>
-        </div>
-      </div>
-      {#if isMinor}
-        <p class="bad">Participante menor de edad: se requiere tutor y firma manuscrita del tutor.</p>
-        <button type="button" on:click={() => (guardianModalOpen = true)}>
-          {hasRequiredGuardianFields() ? "Editar datos de tutor" : "Capturar datos de tutor"}
-        </button>
-      {/if}
-
-      <div class="checkbox-group">
-        <label><input type="checkbox" bind:checked={form.hasMedicalCondition} /> Tengo condición médica relevante</label>
-        <label><input type="checkbox" bind:checked={form.consumedAlcoholOrDrugs} /> Consumí alcohol o drogas hoy</label>
-        <label><input type="checkbox" bind:checked={form.acceptsSafetyRules} /> Acepto reglas de seguridad</label>
       </div>
 
-      <h3 class="form-section-title">Carta responsiva</h3>
-      <p class="waiver">{selectedAttraction?.waiverText || ""}</p>
-      <label><input type="checkbox" bind:checked={form.acceptedText} /> Leí y acepto la carta responsiva</label>
-      <div class="form-grid-2 signature-grid">
-        <div class="field-group signature-block">
-          <p class="signature-label"><b>Firma del participante</b> <span class="signature-hint">(mouse, dedo o stylus)</span></p>
-          <canvas class="signature-pad" bind:this={signatureCanvas} use:signaturePad width="700" height="180"></canvas>
-          <button type="button" class="signature-clear" on:click={clearSignature}>Limpiar firma participante</button>
+      <div class="form-section">
+        <h3 class="form-section-title">Referencias familiares</h3>
+        <div class="form-section-body">
+          <div class="form-grid-2 family-refs-grid">
+            <div class="family-ref-col">
+              <div class="field-group">
+                <label class="field-label" for="emergencyName">Referencia 1 — Nombre</label>
+                <input id="emergencyName" bind:value={form.emergencyContactName} autocomplete="name" />
+              </div>
+              <div class="field-group">
+                <label class="field-label" for="emergencyRelationship">Referencia 1 — Parentesco</label>
+                <input id="emergencyRelationship" bind:value={form.emergencyContactRelationship} placeholder="Ej. padre, madre, cónyuge" />
+              </div>
+              <div class="field-group">
+                <label class="field-label" for="emergencyPhone">Referencia 1 — Teléfono</label>
+                <input id="emergencyPhone" bind:value={form.emergencyContactPhone} type="tel" autocomplete="tel" inputmode="tel" />
+              </div>
+            </div>
+            <div class="family-ref-col">
+              <div class="field-group">
+                <label class="field-label" for="familyRef2Name">Referencia 2 — Nombre</label>
+                <input id="familyRef2Name" bind:value={form.familyReference2Name} autocomplete="name" />
+              </div>
+              <div class="field-group">
+                <label class="field-label" for="familyRef2Relationship">Referencia 2 — Parentesco</label>
+                <input id="familyRef2Relationship" bind:value={form.familyReference2Relationship} placeholder="Ej. hermano, tío" />
+              </div>
+              <div class="field-group">
+                <label class="field-label" for="familyRef2Phone">Referencia 2 — Teléfono</label>
+                <input id="familyRef2Phone" bind:value={form.familyReference2Phone} type="tel" inputmode="tel" />
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="field-group signature-block">
-          <p class="signature-label"><b>Firma del testigo</b> <span class="signature-hint">(mouse, dedo o stylus)</span></p>
-          <canvas class="signature-pad" bind:this={witnessSignatureCanvas} use:witnessSignaturePad width="700" height="180"></canvas>
-          <button type="button" class="signature-clear" on:click={clearWitnessSignature}>Limpiar firma testigo</button>
+      </div>
+
+      <div class="form-section">
+        <h3 class="form-section-title">Declaraciones</h3>
+        <div class="form-section-body">
+          {#if isMinor}
+            <p class="bad">Participante menor de edad: se requiere tutor y firma manuscrita del tutor.</p>
+            <button type="button" on:click={() => (guardianModalOpen = true)}>
+              {hasRequiredGuardianFields() ? "Editar datos de tutor" : "Capturar datos de tutor"}
+            </button>
+          {/if}
+          <div class="checkbox-group">
+            <label class="checkbox-label"><input type="checkbox" bind:checked={form.hasMedicalCondition} /> Tengo condición médica relevante</label>
+            <label class="checkbox-label"><input type="checkbox" bind:checked={form.consumedAlcoholOrDrugs} /> Consumí alcohol o drogas hoy</label>
+            <label class="checkbox-label"><input type="checkbox" bind:checked={form.acceptsSafetyRules} /> Acepto reglas de seguridad</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <h3 class="form-section-title">Carta responsiva</h3>
+        <div class="form-section-body">
+          <p class="waiver">{selectedAttraction?.waiverText || ""}</p>
+          <label class="checkbox-label"><input type="checkbox" bind:checked={form.acceptedText} /> Leí y acepto la carta responsiva</label>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <h3 class="form-section-title">Firmas</h3>
+        <div class="form-section-body">
+          <div class="form-grid-2 signature-grid">
+            <div class="field-group signature-block">
+              <p class="signature-label"><b>Firma del participante</b> <span class="signature-hint">(mouse, dedo o stylus)</span></p>
+              <canvas class="signature-pad" bind:this={signatureCanvas} use:signaturePad width="700" height="180"></canvas>
+              <button type="button" class="signature-clear" on:click={clearSignature}>Limpiar firma participante</button>
+            </div>
+            <div class="field-group signature-block">
+              <p class="signature-label"><b>Firma del testigo</b> <span class="signature-hint">(mouse, dedo o stylus)</span></p>
+              <canvas class="signature-pad" bind:this={witnessSignatureCanvas} use:witnessSignaturePad width="700" height="180"></canvas>
+              <button type="button" class="signature-clear" on:click={clearWitnessSignature}>Limpiar firma testigo</button>
+            </div>
+          </div>
         </div>
       </div>
       <button class="submit-waiver" on:click={submitWaiver} disabled={loading}>{loading ? "Redirigiendo al pago..." : "Firmar y pagar"}</button>
@@ -1641,21 +1666,38 @@ async function handleCancelledPayment() {
     margin-top: 4px;
   }
   .waiver-form {
+    gap: 16px;
+  }
+  .waiver-form .form-section {
+    border: 1px solid #e3d7c4;
+    border-radius: 10px;
+    background: #fff;
+    padding: 14px;
+    display: grid;
     gap: 12px;
   }
   .waiver-form .form-section-title {
-    margin: 4px 0 0;
-    font-size: 16px;
+    margin: 0;
+    font-size: 18px;
+    font-weight: 700;
     color: #1f4a3b;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #ebdfcc;
+    line-height: 1.3;
+  }
+  .waiver-form .form-section-body {
+    display: grid;
+    gap: 12px;
   }
   .waiver-form .field-group {
     display: grid;
-    gap: 4px;
+    gap: 6px;
     align-content: start;
     min-width: 0;
   }
   .waiver-form .field-group .field-label {
     margin-top: 0;
+    line-height: 1.3;
   }
   .form-grid-2 {
     display: grid;
@@ -1670,20 +1712,38 @@ async function handleCancelledPayment() {
   }
   .waiver-form .checkbox-group {
     display: grid;
-    gap: 8px;
-  }
-  .waiver-form .checkbox-group label {
-    display: flex;
-    align-items: flex-start;
     gap: 10px;
+  }
+  .waiver-form .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 44px;
     line-height: 1.35;
     font-weight: 500;
+    color: #1f4a3b;
+    cursor: pointer;
   }
-  .waiver-form .checkbox-group input[type="checkbox"] {
-    width: 18px;
-    height: 18px;
-    margin-top: 2px;
-    flex: 0 0 auto;
+  .waiver-form input[type="checkbox"],
+  .waiver-form input[type="radio"] {
+    width: 20px;
+    height: 20px;
+    min-height: 0;
+    padding: 0;
+    margin: 0;
+    flex: 0 0 20px;
+    accent-color: #1f4a3b;
+    cursor: pointer;
+  }
+  .waiver-form .radio-row {
+    align-items: center;
+  }
+  .waiver-form .radio-row label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    cursor: pointer;
   }
   .signature-label {
     margin: 0;
@@ -1704,12 +1764,9 @@ async function handleCancelledPayment() {
   .submit-waiver {
     margin-top: 4px;
   }
-  .waiver-form input,
+  .waiver-form input:not([type="checkbox"]):not([type="radio"]),
   .waiver-form select {
     font-size: 16px;
-    min-height: 44px;
-  }
-  .waiver-form .radio-row label {
     min-height: 44px;
   }
   @media (min-width: 600px) {
