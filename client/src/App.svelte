@@ -46,8 +46,9 @@
   let adminAttractionEditId = "";
   let editWaiverText = "";
   let editAttractionDescription = "";
+  let editStripeEnabled = false;
   let newUser = { name: "", email: "", password: "", role: "staff" };
-  let newAttraction = { name: "", code: "", description: "", waiverText: "", active: true };
+  let newAttraction = { name: "", code: "", description: "", waiverText: "", active: true, stripeEnabled: false };
   let showAdminLogin = false;
   let adminTab = "new-attraction";
 
@@ -95,6 +96,7 @@ let form = {
 
   $: participantAge = getAge(form.birthDate);
   $: isMinor = participantAge !== null && participantAge < 18;
+  $: requiresStripePayment = selectedAttraction?.stripeEnabled === true;
 
   function signaturePad(node) {
     const ctx = node.getContext("2d");
@@ -638,22 +640,35 @@ let form = {
           : undefined
       };
 
-      const { draftKey } = await api("/public/waiver-drafts", "POST", pendingWaiverPayload);
-      localStorage.setItem("pendingWaiverDraftKey", draftKey);
+      if (requiresStripePayment) {
+        const { draftKey } = await api("/public/waiver-drafts", "POST", pendingWaiverPayload);
+        localStorage.setItem("pendingWaiverDraftKey", draftKey);
 
-      const checkout = await api("/public/create-checkout-session", "POST", {
-        amount: 3000,
-        successPath: "/success",
-        cancelPath: "/cancel",
-        draftKey
-      });
+        const checkout = await api("/public/create-checkout-session", "POST", {
+          amount: 3000,
+          successPath: "/success",
+          cancelPath: "/cancel",
+          draftKey
+        });
 
-      if (!checkout?.url) {
-        throw new Error("No se recibió la URL de pago.");
+        if (!checkout?.url) {
+          throw new Error("No se recibió la URL de pago.");
+        }
+
+        window.location.href = checkout.url;
+        return;
       }
 
-      window.location.href = checkout.url;
-      return;
+      waiverResult = await api("/public/waivers", "POST", pendingWaiverPayload);
+      await tick();
+      if (!qrCanvas) await tick();
+      if (waiverResult?.qrUrl && qrCanvas) {
+        try {
+          await QRCode.toCanvas(qrCanvas, waiverResult.qrUrl);
+        } catch {
+          /* mismo comportamiento silencioso si el canvas falla */
+        }
+      }
     } catch (e) {
       message = e.message;
     } finally {
@@ -1011,7 +1026,7 @@ async function handleCancelledPayment() {
     message = "";
     try {
       await api("/admin/attractions", "POST", newAttraction);
-      newAttraction = { name: "", code: "", description: "", waiverText: "", active: true };
+      newAttraction = { name: "", code: "", description: "", waiverText: "", active: true, stripeEnabled: false };
       await loadAdminData();
       message = "Atracción creada.";
     } catch (e) {
@@ -1028,12 +1043,14 @@ async function handleCancelledPayment() {
     adminAttractionEditId = item._id;
     editWaiverText = item.waiverText || "";
     editAttractionDescription = item.description || "";
+    editStripeEnabled = item.stripeEnabled === true;
   }
 
   function cancelEditAttraction() {
     adminAttractionEditId = "";
     editWaiverText = "";
     editAttractionDescription = "";
+    editStripeEnabled = false;
   }
 
   async function saveAttractionText(item) {
@@ -1041,7 +1058,8 @@ async function handleCancelledPayment() {
     try {
       await api(`/admin/attractions/${item._id}`, "PATCH", {
         waiverText: editWaiverText,
-        description: editAttractionDescription
+        description: editAttractionDescription,
+        stripeEnabled: editStripeEnabled
       });
       await loadAdminData();
       cancelEditAttraction();
@@ -1238,6 +1256,10 @@ async function handleCancelledPayment() {
           <input bind:value={newAttraction.code} placeholder="Código único" />
           <input bind:value={newAttraction.description} placeholder="Descripción corta" />
           <textarea bind:value={newAttraction.waiverText} rows="8" placeholder="Texto del waiver (opcional)"></textarea>
+          <label class="checkbox-label admin-checkbox">
+            <input type="checkbox" bind:checked={newAttraction.stripeEnabled} />
+            Requiere pago en línea (Stripe) — eventos fuera del parque
+          </label>
           <button on:click={createAttraction}>Crear atracción</button>
         {/if}
 
@@ -1245,7 +1267,14 @@ async function handleCancelledPayment() {
           <h3>Atracciones</h3>
           {#each adminAttractions as item}
             <div class="item">
-              <p><b>{item.name}</b> ({item.code}) - {item.active ? "Activa" : "Inactiva"}</p>
+              <p>
+                <b>{item.name}</b> ({item.code}) - {item.active ? "Activa" : "Inactiva"}
+                {#if item.stripeEnabled}
+                  · Pago Stripe
+                {:else}
+                  · Sin pago en línea
+                {/if}
+              </p>
               <div class="inline-actions">
                 <button on:click={() => startEditAttraction(item)}>Editar texto</button>
                 <button on:click={() => toggleAttraction(item)}>
@@ -1259,6 +1288,10 @@ async function handleCancelledPayment() {
                 <input id="editDescription" bind:value={editAttractionDescription} />
                 <label class="field-label" for="editWaiverText">Carta responsiva</label>
                 <textarea id="editWaiverText" bind:value={editWaiverText} rows="10"></textarea>
+                <label class="checkbox-label admin-checkbox">
+                  <input type="checkbox" bind:checked={editStripeEnabled} />
+                  Requiere pago en línea (Stripe) — eventos fuera del parque
+                </label>
                 <div class="inline-actions">
                   <button type="button" on:click={() => saveAttractionText(item)}>Guardar cambios</button>
                   <button type="button" on:click={cancelEditAttraction}>Cancelar</button>
@@ -1548,7 +1581,15 @@ async function handleCancelledPayment() {
           </div>
         </div>
       </div>
-      <button class="submit-waiver" on:click={submitWaiver} disabled={loading}>{loading ? "Redirigiendo al pago..." : "Firmar y pagar"}</button>
+      <button class="submit-waiver" on:click={submitWaiver} disabled={loading}>
+        {loading
+          ? requiresStripePayment
+            ? "Redirigiendo al pago..."
+            : "Registrando waiver..."
+          : requiresStripePayment
+            ? "Firmar y pagar"
+            : "Firmar waiver"}
+      </button>
     </section>
 
     {#if guardianModalOpen}
@@ -1763,6 +1804,23 @@ async function handleCancelledPayment() {
   }
   .submit-waiver {
     margin-top: 4px;
+  }
+  .admin-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 500;
+    color: #1f4a3b;
+    cursor: pointer;
+  }
+  .admin-checkbox input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    min-height: 0;
+    margin: 0;
+    flex: 0 0 18px;
+    accent-color: #1f4a3b;
+    cursor: pointer;
   }
   .waiver-form input:not([type="checkbox"]):not([type="radio"]),
   .waiver-form select {

@@ -86,7 +86,7 @@ export function adminRoutes({ jwtSecret }) {
   });
 
   router.post("/attractions", async (req, res) => {
-    const { name, code, description, waiverText, active = true } = req.body ?? {};
+    const { name, code, description, waiverText, active = true, stripeEnabled = false } = req.body ?? {};
     if (!name || !code) return res.status(400).json({ error: "Nombre y código son obligatorios." });
 
     const created = await Attraction.create({
@@ -94,7 +94,8 @@ export function adminRoutes({ jwtSecret }) {
       code: String(code).toUpperCase(),
       description: description ?? "",
       waiverText,
-      active
+      active,
+      stripeEnabled: stripeEnabled === true
     });
     res.status(201).json(created);
   });

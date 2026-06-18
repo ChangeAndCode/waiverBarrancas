@@ -111,6 +111,20 @@ export function publicRoutes({ jwtSecret }) {
         if (dk.length < 48) {
           return res.status(400).json({ error: "draftKey inválido." });
         }
+        const draft = await WaiverDraft.findOne({ key: String(draftKey).trim() }).lean();
+        if (!draft?.payload?.attractionId) {
+          return res.status(400).json({ error: "Borrador inválido." });
+        }
+        const attraction = await Attraction.findOne({
+          _id: draft.payload.attractionId,
+          active: true
+        }).lean();
+        if (!attraction) {
+          return res.status(404).json({ error: "Atracción no encontrada." });
+        }
+        if (!attraction.stripeEnabled) {
+          return res.status(400).json({ error: "Esta atracción no requiere pago en línea." });
+        }
         const join = successPath.includes("?") ? "&" : "?";
         successUrl = `${base}${successPath}${join}draft=${dk}`;
       }

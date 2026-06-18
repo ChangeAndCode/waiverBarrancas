@@ -7,7 +7,8 @@ const attractionSchema = new mongoose.Schema(
     code: { type: String, required: true, unique: true, trim: true },
     description: { type: String, default: "", trim: true },
     waiverText: { type: String, default: defaultWaiverTextMx2026 },
-    active: { type: Boolean, default: true }
+    active: { type: Boolean, default: true },
+    stripeEnabled: { type: Boolean, default: false }
   },
   { timestamps: true }
 );
