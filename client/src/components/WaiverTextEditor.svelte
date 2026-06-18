@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from "svelte";
   import { Editor } from "@tiptap/core";
   import StarterKit from "@tiptap/starter-kit";
+  import Highlight from "@tiptap/extension-highlight";
 
   export let value = "";
 
@@ -27,7 +28,8 @@
       extensions: [
         StarterKit.configure({
           heading: { levels: [2, 3] }
-        })
+        }),
+        Highlight.configure({ multicolor: false })
       ],
       content: value || "<p></p>",
       editorProps: {
@@ -69,6 +71,9 @@
     <button type="button" class:active={isActive("orderedList")} on:click={run("toggleOrderedList")} title="Lista numerada">
       1.
     </button>
+    <button type="button" class="highlight-btn" class:active={isActive("highlight")} on:click={run("toggleHighlight")} title="Resaltar texto">
+      ☀
+    </button>
   </div>
   <div class="waiver-editor-surface" bind:this={element}></div>
 </div>
@@ -105,6 +110,11 @@
     color: #fff;
     border-color: #1f4a3b;
   }
+  .waiver-editor-toolbar button.highlight-btn.active {
+    background: #fef08a;
+    color: #1f4a3b;
+    border-color: #eab308;
+  }
   .waiver-editor-surface {
     min-height: 220px;
     padding: 10px;
@@ -128,5 +138,11 @@
   .waiver-editor-surface :global(.waiver-editor-prose ol) {
     margin: 0 0 0.75em 1.25em;
     padding: 0;
+  }
+  .waiver-editor-surface :global(.waiver-editor-prose mark) {
+    background-color: #fef08a;
+    color: inherit;
+    padding: 0 1px;
+    border-radius: 2px;
   }
 </style>

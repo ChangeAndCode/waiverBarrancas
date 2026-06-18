@@ -13,7 +13,8 @@ const ALLOWED_TAGS = [
   "li",
   "h2",
   "h3",
-  "blockquote"
+  "blockquote",
+  "mark"
 ];
 
 export function looksLikeHtml(text) {

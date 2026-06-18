@@ -38,4 +38,10 @@
   .waiver :global(b) {
     font-weight: 700;
   }
+  .waiver :global(mark) {
+    background-color: #fef08a;
+    color: inherit;
+    padding: 0 1px;
+    border-radius: 2px;
+  }
 </style>
