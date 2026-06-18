@@ -1437,18 +1437,24 @@ async function handleCancelledPayment() {
       <label class="field-label" for="physicianPhone">Teléfono del médico</label>
       <input id="physicianPhone" bind:value={form.physicianPhone} type="tel" inputmode="tel" />
       <h3>Referencias familiares</h3>
-      <label class="field-label" for="emergencyName">Referencia 1 — Nombre</label>
-      <input id="emergencyName" bind:value={form.emergencyContactName} autocomplete="name" />
-      <label class="field-label" for="emergencyRelationship">Referencia 1 — Parentesco</label>
-      <input id="emergencyRelationship" bind:value={form.emergencyContactRelationship} placeholder="Ej. padre, madre, cónyuge" />
-      <label class="field-label" for="emergencyPhone">Referencia 1 — Teléfono</label>
-      <input id="emergencyPhone" bind:value={form.emergencyContactPhone} type="tel" autocomplete="tel" inputmode="tel" />
-      <label class="field-label" for="familyRef2Name">Referencia 2 — Nombre</label>
-      <input id="familyRef2Name" bind:value={form.familyReference2Name} autocomplete="name" />
-      <label class="field-label" for="familyRef2Relationship">Referencia 2 — Parentesco</label>
-      <input id="familyRef2Relationship" bind:value={form.familyReference2Relationship} placeholder="Ej. hermano, tío" />
-      <label class="field-label" for="familyRef2Phone">Referencia 2 — Teléfono</label>
-      <input id="familyRef2Phone" bind:value={form.familyReference2Phone} type="tel" inputmode="tel" />
+      <div class="family-refs-grid">
+        <div class="family-ref-col">
+          <label class="field-label" for="emergencyName">Referencia 1 — Nombre</label>
+          <input id="emergencyName" bind:value={form.emergencyContactName} autocomplete="name" />
+          <label class="field-label" for="emergencyRelationship">Referencia 1 — Parentesco</label>
+          <input id="emergencyRelationship" bind:value={form.emergencyContactRelationship} placeholder="Ej. padre, madre, cónyuge" />
+          <label class="field-label" for="emergencyPhone">Referencia 1 — Teléfono</label>
+          <input id="emergencyPhone" bind:value={form.emergencyContactPhone} type="tel" autocomplete="tel" inputmode="tel" />
+        </div>
+        <div class="family-ref-col">
+          <label class="field-label" for="familyRef2Name">Referencia 2 — Nombre</label>
+          <input id="familyRef2Name" bind:value={form.familyReference2Name} autocomplete="name" />
+          <label class="field-label" for="familyRef2Relationship">Referencia 2 — Parentesco</label>
+          <input id="familyRef2Relationship" bind:value={form.familyReference2Relationship} placeholder="Ej. hermano, tío" />
+          <label class="field-label" for="familyRef2Phone">Referencia 2 — Teléfono</label>
+          <input id="familyRef2Phone" bind:value={form.familyReference2Phone} type="tel" inputmode="tel" />
+        </div>
+      </div>
       {#if isMinor}
         <p class="bad">Participante menor de edad: se requiere tutor y firma manuscrita del tutor.</p>
         <button type="button" on:click={() => (guardianModalOpen = true)}>
@@ -1585,6 +1591,21 @@ async function handleCancelledPayment() {
     font-weight: 600;
     color: #1f4a3b;
     margin-top: 4px;
+  }
+  .family-refs-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .family-ref-col {
+    display: grid;
+    gap: 10px;
+    align-content: start;
+  }
+  @media (max-width: 640px) {
+    .family-refs-grid {
+      grid-template-columns: 1fr;
+    }
   }
   button {
     cursor: pointer;
