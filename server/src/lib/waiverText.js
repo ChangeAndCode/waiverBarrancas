@@ -21,8 +21,15 @@ function normalizeWaiverTextLayout(text) {
     .join("\n\n");
 }
 
+function looksLikeHtml(text) {
+  return /<[a-z][\s\S]*>/i.test(String(text || ""));
+}
+
 export function renderWaiverTextForSignature(text, signedAt = new Date()) {
-  return normalizeWaiverTextLayout(text).replaceAll("{{SIGN_DATE}}", formatMxDateTime(signedAt));
+  const raw = String(text || "");
+  const withDate = raw.replaceAll("{{SIGN_DATE}}", formatMxDateTime(signedAt));
+  if (looksLikeHtml(raw)) return withDate;
+  return normalizeWaiverTextLayout(withDate);
 }
 
 export const defaultWaiverTextMx2026 = `

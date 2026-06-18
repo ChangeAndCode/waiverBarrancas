@@ -2,6 +2,9 @@
   import { onDestroy, tick } from "svelte";
   import QRCode from "qrcode";
   import logoBarrancas from "../logobarrancas.png";
+  import WaiverTextEditor from "./components/WaiverTextEditor.svelte";
+  import WaiverTextView from "./components/WaiverTextView.svelte";
+  import { isWaiverTextEmpty } from "./lib/waiverHtml.js";
 
   const API_BASE = "/api";
   let path = window.location.pathname;
@@ -49,6 +52,7 @@
   let editStripeEnabled = false;
   let newUser = { name: "", email: "", password: "", role: "staff" };
   let newAttraction = { name: "", code: "", description: "", waiverText: "", active: true, stripeEnabled: false };
+  let waiverEditorKey = 0;
   let showAdminLogin = false;
   let adminTab = "new-attraction";
 
@@ -1024,9 +1028,18 @@ async function handleCancelledPayment() {
 
   async function createAttraction() {
     message = "";
+    if (!newAttraction.name?.trim() || !newAttraction.code?.trim()) {
+      message = "Nombre y código son obligatorios.";
+      return;
+    }
+    if (isWaiverTextEmpty(newAttraction.waiverText)) {
+      message = "El texto del waiver es obligatorio.";
+      return;
+    }
     try {
       await api("/admin/attractions", "POST", newAttraction);
       newAttraction = { name: "", code: "", description: "", waiverText: "", active: true, stripeEnabled: false };
+      waiverEditorKey += 1;
       await loadAdminData();
       message = "Atracción creada.";
     } catch (e) {
@@ -1055,6 +1068,10 @@ async function handleCancelledPayment() {
 
   async function saveAttractionText(item) {
     message = "";
+    if (isWaiverTextEmpty(editWaiverText)) {
+      message = "El texto del waiver es obligatorio.";
+      return;
+    }
     try {
       await api(`/admin/attractions/${item._id}`, "PATCH", {
         waiverText: editWaiverText,
@@ -1255,7 +1272,10 @@ async function handleCancelledPayment() {
           <input bind:value={newAttraction.name} placeholder="Nombre" />
           <input bind:value={newAttraction.code} placeholder="Código único" />
           <input bind:value={newAttraction.description} placeholder="Descripción corta" />
-          <textarea bind:value={newAttraction.waiverText} rows="8" placeholder="Texto del waiver (opcional)"></textarea>
+          <label class="field-label" for="newWaiverText">Carta responsiva</label>
+          {#key waiverEditorKey}
+            <WaiverTextEditor bind:value={newAttraction.waiverText} />
+          {/key}
           <label class="checkbox-label admin-checkbox">
             <input type="checkbox" bind:checked={newAttraction.stripeEnabled} />
             Requiere pago en línea (Stripe) — eventos fuera del parque
@@ -1287,7 +1307,9 @@ async function handleCancelledPayment() {
                 <label class="field-label" for="editDescription">Descripción</label>
                 <input id="editDescription" bind:value={editAttractionDescription} />
                 <label class="field-label" for="editWaiverText">Carta responsiva</label>
-                <textarea id="editWaiverText" bind:value={editWaiverText} rows="10"></textarea>
+                {#key adminAttractionEditId}
+                  <WaiverTextEditor bind:value={editWaiverText} />
+                {/key}
                 <label class="checkbox-label admin-checkbox">
                   <input type="checkbox" bind:checked={editStripeEnabled} />
                   Requiere pago en línea (Stripe) — eventos fuera del parque
@@ -1559,7 +1581,7 @@ async function handleCancelledPayment() {
       <div class="form-section">
         <h3 class="form-section-title">Carta responsiva</h3>
         <div class="form-section-body">
-          <p class="waiver">{selectedAttraction?.waiverText || ""}</p>
+          <WaiverTextView content={selectedAttraction?.waiverText || ""} />
           <label class="checkbox-label"><input type="checkbox" bind:checked={form.acceptedText} /> Leí y acepto la carta responsiva</label>
         </div>
       </div>
@@ -1849,14 +1871,6 @@ async function handleCancelledPayment() {
   }
   nav button:hover {
     background: #d29a45;
-  }
-  .waiver {
-    white-space: pre-wrap;
-    background: #fff;
-    padding: 10px;
-    border: 1px solid #e7dbc8;
-    border-radius: 6px;
-    line-height: 1.4;
   }
   .signature-pad {
     width: 100%;

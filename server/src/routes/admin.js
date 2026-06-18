@@ -88,6 +88,12 @@ export function adminRoutes({ jwtSecret }) {
   router.post("/attractions", async (req, res) => {
     const { name, code, description, waiverText, active = true, stripeEnabled = false } = req.body ?? {};
     if (!name || !code) return res.status(400).json({ error: "Nombre y código son obligatorios." });
+    const waiverPlain = String(waiverText || "")
+      .replace(/<[^>]*>/g, " ")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!waiverPlain) return res.status(400).json({ error: "El texto del waiver es obligatorio." });
 
     const created = await Attraction.create({
       name,
@@ -103,6 +109,14 @@ export function adminRoutes({ jwtSecret }) {
   router.patch("/attractions/:id", async (req, res) => {
     const payload = { ...req.body };
     if (payload.code) payload.code = String(payload.code).toUpperCase();
+    if (payload.waiverText !== undefined) {
+      const waiverPlain = String(payload.waiverText || "")
+        .replace(/<[^>]*>/g, " ")
+        .replace(/&nbsp;/gi, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (!waiverPlain) return res.status(400).json({ error: "El texto del waiver es obligatorio." });
+    }
     const updated = await Attraction.findByIdAndUpdate(req.params.id, payload, { new: true }).lean();
     if (!updated) return res.status(404).json({ error: "Atracción no encontrada." });
     res.json(updated);
