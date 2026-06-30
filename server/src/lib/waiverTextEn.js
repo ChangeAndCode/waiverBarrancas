@@ -19,9 +19,9 @@ export const WAIVER_TEXT_EN_HTML = `
 <p><em>Times and schedules may vary depending on visitor volume, weather conditions, or other operational circumstances.</em></p>
 <p><strong>HEIGHT AND WEIGHT RESTRICTIONS</strong></p>
 <ul>
-<li><strong>Treetop Adventure (Bosque Aéreo):</strong> Min. height: 1.50 m / Weight: 40 kg – 80 kg</li>
-<li><strong>Via Ferrata:</strong> Min. height: 1.60 m / Weight: 40 kg – 99 kg</li>
-<li><strong>Seven-Zipline Circuit (Circuito de 7 Tirolesas):</strong> 1.60 m – 2.00 m / Weight: 45 kg – 118 kg</li>
-<li><strong>ZipRider:</strong> Min. height: 1.60 m – 1.90 m / Weight: 45 kg – 99 kg</li>
+<li><strong>Treetop Adventure (Bosque Aéreo):</strong> Min. height: 1.50 m (~4'11") / Weight: 40 kg – 80 kg (~88 – 176 lbs)</li>
+<li><strong>Via Ferrata:</strong> Min. height: 1.60 m (~5'3") / Weight: 40 kg – 99 kg (~88 – 218 lbs)</li>
+<li><strong>Seven-Zipline Circuit (Circuito de 7 Tirolesas):</strong> 1.60 m – 2.00 m (~5'3" – 6'7") / Weight: 45 kg – 118 kg (~99 – 260 lbs)</li>
+<li><strong>ZipRider:</strong> Min. height: 1.60 m – 1.90 m (~5'3" – 6'3") / Weight: 45 kg – 99 kg (~99 – 218 lbs)</li>
 </ul>
 `.trim();
