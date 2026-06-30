@@ -5,6 +5,13 @@
   import WaiverTextEditor from "./components/WaiverTextEditor.svelte";
   import WaiverTextView from "./components/WaiverTextView.svelte";
   import { isWaiverTextEmpty } from "./lib/waiverHtml.js";
+  import {
+    NATIONALITIES,
+    MEXICO_STATES,
+    citiesForState,
+    buildCityStateLabel
+  } from "./lib/locationOptions.js";
+  import { collectWaiverFieldErrors } from "./lib/waiverFormValidation.js";
 
   const API_BASE = "/api";
   let path = window.location.pathname;
@@ -86,6 +93,16 @@ let form = {
   };
   /** Firma tutor persistida al cerrar el modal (el canvas se destruye al ocultarlo). */
   let guardianSignaturePng = "";
+  let takesMedications = "";
+  let selectedNationality = "México";
+  let selectedState = "";
+  let selectedCity = "";
+  let customCity = "";
+  let foreignCityState = "";
+  let fieldErrors = {};
+  let showFieldErrors = false;
+
+  $: availableCities = citiesForState(selectedState);
 
   function getAge(birthDateString) {
     if (!birthDateString) return null;
@@ -481,34 +498,66 @@ let form = {
     };
     guardianSignaturePng = "";
     guardianModalOpen = false;
+    takesMedications = "";
+    selectedNationality = "México";
+    selectedState = "";
+    selectedCity = "";
+    customCity = "";
+    foreignCityState = "";
+    fieldErrors = {};
+    showFieldErrors = false;
     clearSignature();
     clearGuardianSignature();
     clearWitnessSignature();
     window.location.reload();
   }
 
-  function hasRequiredParticipantFields() {
-    return (
-      !!selectedAttractionId &&
-      !!form.fullName.trim() &&
-      !!form.birthDate &&
-      !!form.gender &&
-      !!form.phone.trim() &&
-      !!form.email.trim() &&
-      !!form.nationality.trim() &&
-      !!form.cityState.trim() &&
-      !!form.medications.trim() &&
-      !!form.treatingPhysician.trim() &&
-      !!form.physicianPhone.trim() &&
-      !!form.emergencyContactName.trim() &&
-      !!form.emergencyContactRelationship.trim() &&
-      !!form.emergencyContactPhone.trim() &&
-      !!form.familyReference2Name.trim() &&
-      !!form.familyReference2Relationship.trim() &&
-      !!form.familyReference2Phone.trim() &&
-      form.acceptedText === true &&
-      form.acceptsSafetyRules === true
-    );
+  function fieldInvalid(key) {
+    return showFieldErrors && fieldErrors[key];
+  }
+
+  function onLocationStateChange() {
+    selectedCity = "";
+    customCity = "";
+  }
+
+  function syncParticipantLocationFields() {
+    form.nationality = selectedNationality;
+    form.cityState = buildCityStateLabel({
+      nationality: selectedNationality,
+      state: selectedState,
+      city: selectedCity,
+      customCity,
+      foreignCityState
+    });
+  }
+
+  function prepareMedicationFields() {
+    if (takesMedications === "no") {
+      form.medications = "No";
+      form.treatingPhysician = "";
+      form.physicianPhone = "";
+      return;
+    }
+    if (takesMedications === "yes" && !form.medications.trim()) {
+      form.medications = "";
+    }
+  }
+
+  function validateWaiverForm() {
+    syncParticipantLocationFields();
+    prepareMedicationFields();
+    fieldErrors = collectWaiverFieldErrors({
+      form,
+      selectedAttractionId,
+      takesMedications,
+      selectedNationality,
+      selectedState,
+      selectedCity,
+      customCity,
+      foreignCityState
+    });
+    return Object.keys(fieldErrors).length === 0;
   }
 
   function hasRequiredGuardianFields() {
@@ -573,21 +622,24 @@ let form = {
     waiverSubmitInFlight = true;
     loading = true;
     message = "";
-    if (!hasRequiredParticipantFields()) {
+    showFieldErrors = true;
+    if (!validateWaiverForm()) {
       waiverSubmitInFlight = false;
       loading = false;
-      message = "Todos los campos son obligatorios y debes aceptar reglas y carta responsiva.";
+      message = "Revisa los campos marcados en rojo.";
       return;
     }
     if (!signatureHasStroke || !signatureCanvas) {
       waiverSubmitInFlight = false;
       loading = false;
-      message = "La firma manuscrita es obligatoria.";
+      fieldErrors = { ...fieldErrors, signatureImage: true };
+      message = "La firma manuscrita del participante es obligatoria.";
       return;
     }
     if (!witnessSignatureHasStroke || !witnessSignatureCanvas) {
       waiverSubmitInFlight = false;
       loading = false;
+      fieldErrors = { ...fieldErrors, witnessSignatureImage: true };
       message = "La firma del testigo es obligatoria.";
       return;
     }
@@ -1463,7 +1515,7 @@ async function handleCancelledPayment() {
       <div class="form-section">
         <h3 class="form-section-title">Datos del participante</h3>
         <div class="form-section-body">
-          <div class="field-group">
+          <div class="field-group" class:field-invalid={fieldInvalid("attractionId")}>
             <label class="field-label" for="atraccion">Atracción</label>
             <select id="atraccion" bind:value={selectedAttractionId} on:change={() => (selectedAttraction = attractions.find((a) => a._id === selectedAttractionId))}>
               {#each attractions as a}
@@ -1471,16 +1523,16 @@ async function handleCancelledPayment() {
               {/each}
             </select>
           </div>
-          <div class="field-group">
+          <div class="field-group" class:field-invalid={fieldInvalid("fullName")}>
             <label class="field-label" for="fullName">Nombre completo (como en tu INE)</label>
             <input id="fullName" bind:value={form.fullName} autocomplete="name" />
           </div>
           <div class="form-grid-2">
-            <div class="field-group">
+            <div class="field-group" class:field-invalid={fieldInvalid("birthDate")}>
               <label class="field-label" for="birthDate">Fecha de nacimiento</label>
               <input id="birthDate" type="date" bind:value={form.birthDate} />
             </div>
-            <div class="field-group">
+            <div class="field-group" class:field-invalid={fieldInvalid("gender")}>
               <p class="field-label">Sexo</p>
               <div class="radio-row" role="radiogroup" aria-label="Sexo">
                 <label><input type="radio" bind:group={form.gender} value="masculino" /> Masculino</label>
@@ -1489,39 +1541,85 @@ async function handleCancelledPayment() {
             </div>
           </div>
           <div class="form-grid-2">
-            <div class="field-group">
+            <div class="field-group" class:field-invalid={fieldInvalid("phone")}>
               <label class="field-label" for="phone">Teléfono</label>
               <input id="phone" bind:value={form.phone} type="tel" autocomplete="tel" inputmode="tel" />
             </div>
-            <div class="field-group">
+            <div class="field-group" class:field-invalid={fieldInvalid("email")}>
               <label class="field-label" for="email">Correo electrónico</label>
               <input id="email" bind:value={form.email} type="email" autocomplete="email" inputmode="email" />
             </div>
           </div>
           <div class="form-grid-2">
-            <div class="field-group">
+            <div class="field-group" class:field-invalid={fieldInvalid("nationality")}>
               <label class="field-label" for="nationality">Nacionalidad</label>
-              <input id="nationality" bind:value={form.nationality} autocomplete="country-name" />
+              <select id="nationality" bind:value={selectedNationality}>
+                <option value="">Selecciona nacionalidad</option>
+                {#each NATIONALITIES as country}
+                  <option value={country}>{country}</option>
+                {/each}
+              </select>
             </div>
-            <div class="field-group">
-              <label class="field-label" for="cityState">Ciudad / Estado</label>
-              <input id="cityState" bind:value={form.cityState} autocomplete="address-level2" />
-            </div>
+            {#if selectedNationality === "México"}
+              <div class="field-group" class:field-invalid={fieldInvalid("state")}>
+                <label class="field-label" for="state">Estado</label>
+                <select id="state" bind:value={selectedState} on:change={onLocationStateChange}>
+                  <option value="">Selecciona estado</option>
+                  {#each MEXICO_STATES as state}
+                    <option value={state}>{state}</option>
+                  {/each}
+                </select>
+              </div>
+            {:else}
+              <div class="field-group" class:field-invalid={fieldInvalid("foreignCityState")}>
+                <label class="field-label" for="foreignCityState">Ciudad / Estado</label>
+                <input id="foreignCityState" bind:value={foreignCityState} autocomplete="address-level2" />
+              </div>
+            {/if}
           </div>
-          <div class="field-group">
-            <label class="field-label" for="medications">¿Toma medicamentos? / Dosis</label>
-            <input id="medications" bind:value={form.medications} placeholder="Ej. No, o nombre y dosis" />
-          </div>
-          <div class="form-grid-2">
-            <div class="field-group">
-              <label class="field-label" for="treatingPhysician">Médico tratante</label>
-              <input id="treatingPhysician" bind:value={form.treatingPhysician} placeholder="Nombre del médico" />
+          {#if selectedNationality === "México"}
+            <div class="form-grid-2">
+              <div class="field-group" class:field-invalid={fieldInvalid("city")}>
+                <label class="field-label" for="city">Ciudad</label>
+                <select id="city" bind:value={selectedCity} disabled={!selectedState}>
+                  <option value="">{selectedState ? "Selecciona ciudad" : "Primero elige estado"}</option>
+                  {#each availableCities as city}
+                    <option value={city}>{city}</option>
+                  {/each}
+                </select>
+              </div>
+              {#if selectedCity === "Otra"}
+                <div class="field-group" class:field-invalid={fieldInvalid("customCity")}>
+                  <label class="field-label" for="customCity">Especifica ciudad</label>
+                  <input id="customCity" bind:value={customCity} />
+                </div>
+              {/if}
             </div>
-            <div class="field-group">
-              <label class="field-label" for="physicianPhone">Teléfono del médico</label>
-              <input id="physicianPhone" bind:value={form.physicianPhone} type="tel" inputmode="tel" />
-            </div>
+          {/if}
+          <div class="field-group" class:field-invalid={fieldInvalid("takesMedications")}>
+            <label class="field-label" for="takesMedications">¿Toma medicamentos?</label>
+            <select id="takesMedications" bind:value={takesMedications}>
+              <option value="">Selecciona una opción</option>
+              <option value="no">No</option>
+              <option value="yes">Sí</option>
+            </select>
           </div>
+          {#if takesMedications === "yes"}
+            <div class="field-group" class:field-invalid={fieldInvalid("medications")}>
+              <label class="field-label" for="medications">Medicamento / dosis</label>
+              <input id="medications" bind:value={form.medications} placeholder="Ej. Metformina 500 mg" />
+            </div>
+            <div class="form-grid-2">
+              <div class="field-group" class:field-invalid={fieldInvalid("treatingPhysician")}>
+                <label class="field-label" for="treatingPhysician">Médico tratante</label>
+                <input id="treatingPhysician" bind:value={form.treatingPhysician} placeholder="Nombre del médico" />
+              </div>
+              <div class="field-group" class:field-invalid={fieldInvalid("physicianPhone")}>
+                <label class="field-label" for="physicianPhone">Teléfono del médico</label>
+                <input id="physicianPhone" bind:value={form.physicianPhone} type="tel" inputmode="tel" />
+              </div>
+            </div>
+          {/if}
         </div>
       </div>
 
@@ -1530,29 +1628,29 @@ async function handleCancelledPayment() {
         <div class="form-section-body">
           <div class="form-grid-2 family-refs-grid">
             <div class="family-ref-col">
-              <div class="field-group">
+              <div class="field-group" class:field-invalid={fieldInvalid("emergencyContactName")}>
                 <label class="field-label" for="emergencyName">Referencia 1 — Nombre</label>
                 <input id="emergencyName" bind:value={form.emergencyContactName} autocomplete="name" />
               </div>
-              <div class="field-group">
+              <div class="field-group" class:field-invalid={fieldInvalid("emergencyContactRelationship")}>
                 <label class="field-label" for="emergencyRelationship">Referencia 1 — Parentesco</label>
                 <input id="emergencyRelationship" bind:value={form.emergencyContactRelationship} placeholder="Ej. padre, madre, cónyuge" />
               </div>
-              <div class="field-group">
+              <div class="field-group" class:field-invalid={fieldInvalid("emergencyContactPhone")}>
                 <label class="field-label" for="emergencyPhone">Referencia 1 — Teléfono</label>
                 <input id="emergencyPhone" bind:value={form.emergencyContactPhone} type="tel" autocomplete="tel" inputmode="tel" />
               </div>
             </div>
             <div class="family-ref-col">
-              <div class="field-group">
+              <div class="field-group" class:field-invalid={fieldInvalid("familyReference2Name")}>
                 <label class="field-label" for="familyRef2Name">Referencia 2 — Nombre</label>
                 <input id="familyRef2Name" bind:value={form.familyReference2Name} autocomplete="name" />
               </div>
-              <div class="field-group">
+              <div class="field-group" class:field-invalid={fieldInvalid("familyReference2Relationship")}>
                 <label class="field-label" for="familyRef2Relationship">Referencia 2 — Parentesco</label>
                 <input id="familyRef2Relationship" bind:value={form.familyReference2Relationship} placeholder="Ej. hermano, tío" />
               </div>
-              <div class="field-group">
+              <div class="field-group" class:field-invalid={fieldInvalid("familyReference2Phone")}>
                 <label class="field-label" for="familyRef2Phone">Referencia 2 — Teléfono</label>
                 <input id="familyRef2Phone" bind:value={form.familyReference2Phone} type="tel" inputmode="tel" />
               </div>
@@ -1573,7 +1671,7 @@ async function handleCancelledPayment() {
           <div class="checkbox-group">
             <label class="checkbox-label"><input type="checkbox" bind:checked={form.hasMedicalCondition} /> Tengo condición médica relevante</label>
             <label class="checkbox-label"><input type="checkbox" bind:checked={form.consumedAlcoholOrDrugs} /> Consumí alcohol o drogas hoy</label>
-            <label class="checkbox-label"><input type="checkbox" bind:checked={form.acceptsSafetyRules} /> Acepto reglas de seguridad</label>
+            <label class="checkbox-label" class:field-invalid={fieldInvalid("acceptsSafetyRules")}><input type="checkbox" bind:checked={form.acceptsSafetyRules} /> Acepto reglas de seguridad</label>
           </div>
         </div>
       </div>
@@ -1582,7 +1680,7 @@ async function handleCancelledPayment() {
         <h3 class="form-section-title">Carta responsiva</h3>
         <div class="form-section-body">
           <WaiverTextView content={selectedAttraction?.waiverText || ""} />
-          <label class="checkbox-label"><input type="checkbox" bind:checked={form.acceptedText} /> Leí y acepto la carta responsiva</label>
+          <label class="checkbox-label" class:field-invalid={fieldInvalid("acceptedText")}><input type="checkbox" bind:checked={form.acceptedText} /> Leí y acepto la carta responsiva</label>
         </div>
       </div>
 
@@ -1590,12 +1688,12 @@ async function handleCancelledPayment() {
         <h3 class="form-section-title">Firmas</h3>
         <div class="form-section-body">
           <div class="form-grid-2 signature-grid">
-            <div class="field-group signature-block">
+            <div class="field-group signature-block" class:field-invalid={fieldInvalid("signatureImage")}>
               <p class="signature-label"><b>Firma del participante</b> <span class="signature-hint">(mouse, dedo o stylus)</span></p>
               <canvas class="signature-pad" bind:this={signatureCanvas} use:signaturePad width="700" height="180"></canvas>
               <button type="button" class="signature-clear" on:click={clearSignature}>Limpiar firma participante</button>
             </div>
-            <div class="field-group signature-block">
+            <div class="field-group signature-block" class:field-invalid={fieldInvalid("witnessSignatureImage")}>
               <p class="signature-label"><b>Firma del testigo</b> <span class="signature-hint">(mouse, dedo o stylus)</span></p>
               <canvas class="signature-pad" bind:this={witnessSignatureCanvas} use:witnessSignaturePad width="700" height="180"></canvas>
               <button type="button" class="signature-clear" on:click={clearWitnessSignature}>Limpiar firma testigo</button>
@@ -1761,6 +1859,16 @@ async function handleCancelledPayment() {
   .waiver-form .field-group .field-label {
     margin-top: 0;
     line-height: 1.3;
+  }
+  .waiver-form .field-group.field-invalid .field-label,
+  .waiver-form .checkbox-label.field-invalid {
+    color: #b42318;
+  }
+  .waiver-form .field-group.field-invalid input,
+  .waiver-form .field-group.field-invalid select,
+  .waiver-form .field-group.field-invalid .signature-pad {
+    border-color: #b42318;
+    box-shadow: 0 0 0 1px rgba(180, 35, 24, 0.15);
   }
   .form-grid-2 {
     display: grid;

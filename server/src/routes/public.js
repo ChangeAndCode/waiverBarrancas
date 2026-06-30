@@ -9,6 +9,15 @@ import { canSendEmails, sendWaiverQrEmail } from "../lib/email.js";
 import { nowMs, perfLog } from "../lib/perf.js";
 import Stripe from "stripe";
 
+function meaningfulText(value, minLength = 2) {
+  return String(value || "").trim().length >= minLength;
+}
+
+function indicatesNoMedications(medications) {
+  const text = String(medications || "").trim().toLowerCase();
+  return !text || text === "no" || text === "ninguno" || text === "ninguna";
+}
+
 function getStripeClient() {
   const secretKey = process.env.STRIPE_SECRET_KEY;
 
@@ -186,15 +195,18 @@ export function publicRoutes({ jwtSecret }) {
       return res.status(400).json({ error: "Todos los campos del participante son obligatorios." });
     }
     const extendedParticipant =
-      participant.nationality &&
-      participant.cityState &&
-      participant.medications &&
-      participant.treatingPhysician &&
-      participant.physicianPhone &&
-      participant.emergencyContactRelationship &&
-      participant.familyReference2Name &&
-      participant.familyReference2Relationship &&
-      participant.familyReference2Phone;
+      meaningfulText(participant.nationality) &&
+      meaningfulText(participant.cityState, 3) &&
+      meaningfulText(participant.medications, 1) &&
+      (indicatesNoMedications(participant.medications) ||
+        (meaningfulText(participant.treatingPhysician) &&
+          meaningfulText(participant.physicianPhone, 7))) &&
+      meaningfulText(participant.emergencyContactRelationship) &&
+      meaningfulText(participant.emergencyContactName) &&
+      meaningfulText(participant.emergencyContactPhone, 7) &&
+      meaningfulText(participant.familyReference2Name) &&
+      meaningfulText(participant.familyReference2Relationship) &&
+      meaningfulText(participant.familyReference2Phone, 7);
     if (!extendedParticipant) {
       return res.status(400).json({ error: "Faltan campos adicionales del participante." });
     }

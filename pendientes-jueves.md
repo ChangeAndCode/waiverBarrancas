@@ -1,9 +1,9 @@
 # Pendientes jueves
 
-- Dropdowns en cascada para nacionalidad, estado y ciudad
-- No permitir que las referencias familiares se envíen solo con espacios; deben tener longitud mínima
-- Marcar los campos que faltan de llenar si se intenta grabar el waiver incompleto
-- Si se indica que no se toman medicamentos, no pedir médico tratante (hoy no deja avanzar si ese campo queda vacío)
+- [x] Dropdowns en cascada para nacionalidad, estado y ciudad
+- [x] No permitir que las referencias familiares se envíen solo con espacios; deben tener longitud mínima
+- [x] Marcar los campos que faltan de llenar si se intenta grabar el waiver incompleto
+- [x] Si se indica que no se toman medicamentos, no pedir médico tratante (hoy no deja avanzar si ese campo queda vacío)
 
 ## Caja y pago
 
