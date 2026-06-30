@@ -1304,7 +1304,6 @@ async function handleCancelledPayment() {
           <p><b>Nombre:</b> {staffScanResult.waiver.fullName}</p>
           <p><b>Atracción:</b> {staffScanResult.waiver.attractionName}</p>
           <p><b>Folio:</b> {staffScanResult.waiver.id}</p>
-          <p class="staff-reminder">Verificar que el ticket de caja corresponda a esta persona y a esta carta responsiva.</p>
         </div>
       {:else if staffScanResult?.reason === "qr_already_used"}
         <div class="staff-scan-result">
@@ -1957,12 +1956,6 @@ async function handleCancelledPayment() {
     font-size: 14px;
     font-weight: 600;
     color: #1f4a3b;
-  }
-  .staff-reminder {
-    margin: 0;
-    font-size: 13px;
-    color: #5a4a32;
-    line-height: 1.4;
   }
   .waiver-form .field-group {
     display: grid;

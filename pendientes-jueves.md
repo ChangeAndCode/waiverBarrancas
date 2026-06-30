@@ -20,7 +20,7 @@
 - [x] en la referencia tiene que venir tambien una pequeña Leyenda "Que no se encuentre físicamente contigo"
 - nombre completo del cliente, actividad, residente del estado, y le pide la identificacion
 - [x] folio (mas corto porque ahorita trae el foliotote)
-- [x] con el ticket de caja se revisa que la carta responsiva sea de la persona y el ticket
+- con el ticket de caja se revisa que la carta responsiva sea de la persona y el ticket
 - [x] folio de 6 digitos PB1234 
 - [x] el campo para escribir los medicamentos que toma  solo se activa si el radio button de toma de medicamentos
 - ver si se va a conectar con la base de datos
