@@ -12,8 +12,12 @@
     buildCityStateLabel
   } from "./lib/locationOptions.js";
   import { collectWaiverFieldErrors } from "./lib/waiverFormValidation.js";
+  import { getMessages, NATIONALITY_EN } from "./lib/i18n.js";
+  import { WAIVER_TEXT_EN_HTML } from "./lib/waiverTextEn.js";
 
   const API_BASE = "/api";
+  const savedLocale = localStorage.getItem("waiverLocale");
+  let locale = savedLocale === "en" ? "en" : "es";
   let path = window.location.pathname;
   let query = new URLSearchParams(window.location.search);
   let loading = false;
@@ -103,6 +107,19 @@ let form = {
   let showFieldErrors = false;
 
   $: availableCities = citiesForState(selectedState);
+  $: L = getMessages(locale);
+  $: isPublicWaiverUi =
+    !path.startsWith("/check/") && path !== "/staff" && path !== "/admin";
+  $: displayWaiverText =
+    locale === "en" ? WAIVER_TEXT_EN_HTML : selectedAttraction?.waiverText || "";
+  $: isMexico = selectedNationality === "México";
+
+  function setLocale(next) {
+    if (next !== "en" && next !== "es") return;
+    locale = next;
+    localStorage.setItem("waiverLocale", next);
+    document.documentElement.lang = next === "en" ? "en" : "es";
+  }
 
   function getAge(birthDateString) {
     if (!birthDateString) return null;
@@ -457,7 +474,7 @@ let form = {
     if (guardianSignatureCanvas && guardianSignatureHasStroke) {
       guardianSignaturePng = guardianSignatureCanvas.toDataURL("image/png");
     } else if (!hasStoredPng) {
-      message = "La firma manuscrita del tutor es obligatoria.";
+      message = L.guardianSigRequired;
       return;
     }
     guardianModalOpen = false;
@@ -626,28 +643,28 @@ let form = {
     if (!validateWaiverForm()) {
       waiverSubmitInFlight = false;
       loading = false;
-      message = "Revisa los campos marcados en rojo.";
+      message = L.reviewFields;
       return;
     }
     if (!signatureHasStroke || !signatureCanvas) {
       waiverSubmitInFlight = false;
       loading = false;
       fieldErrors = { ...fieldErrors, signatureImage: true };
-      message = "La firma manuscrita del participante es obligatoria.";
+      message = L.participantSigRequired;
       return;
     }
     if (!witnessSignatureHasStroke || !witnessSignatureCanvas) {
       waiverSubmitInFlight = false;
       loading = false;
       fieldErrors = { ...fieldErrors, witnessSignatureImage: true };
-      message = "La firma del testigo es obligatoria.";
+      message = L.witnessSigRequired;
       return;
     }
     if (isMinor && !hasRequiredGuardianFields()) {
       waiverSubmitInFlight = false;
       loading = false;
       guardianModalOpen = true;
-      message = "El participante es menor de edad. Captura datos y firma del tutor.";
+      message = L.minorGuardianRequired;
       return;
     }
     try {
@@ -693,7 +710,8 @@ let form = {
               email: guardian.email,
               signatureImage: guardianSignatureImage
             }
-          : undefined
+          : undefined,
+        locale: locale === "en" ? "en" : "es"
       };
 
       if (requiresStripePayment) {
@@ -786,7 +804,7 @@ let form = {
 }
 
 async function handleCancelledPayment() {
-  message = "El pago fue cancelado. Puedes revisar tus datos e intentarlo de nuevo.";
+  message = L.paymentCancelled;
   const dk = localStorage.getItem("pendingWaiverDraftKey");
   if (dk) {
     try {
@@ -1157,6 +1175,7 @@ async function handleCancelledPayment() {
 
   async function bootstrap() {
     message = "";
+    document.documentElement.lang = locale === "en" ? "en" : "es";
     showAdminLogin = path === "/admin" && (!authToken || authUser?.role !== "admin");
     if (path.startsWith("/check/")) return loadCheck();
     if (path === "/staff") {
@@ -1187,19 +1206,40 @@ async function handleCancelledPayment() {
   <header>
     <div class="brand">
       <img src={logoBarrancas} alt="Parque Barrancas" class="brand-logo" />
-      <h1>Waiver Digital - Parque Temático</h1>
+      <h1>{isPublicWaiverUi ? L.siteTitle : "Waiver Digital - Parque Temático"}</h1>
     </div>
     <nav>
       {#if path === "/admin"}
         <span class="admin-pill">Modo Admin</span>
       {:else}
-        <button on:click={() => goTo("/admin")}>Admin</button>
+        <button on:click={() => goTo("/admin")}>{isPublicWaiverUi ? L.admin : "Admin"}</button>
       {/if}
       {#if authToken}
-        <button on:click={logout}>Salir</button>
+        <button on:click={logout}>{isPublicWaiverUi ? L.logout : "Salir"}</button>
       {/if}
     </nav>
   </header>
+
+  {#if isPublicWaiverUi}
+    <div class="lang-switch" role="group" aria-label="Language">
+      <button
+        type="button"
+        class="lang-btn"
+        class:lang-active={locale === "es"}
+        on:click={() => setLocale("es")}
+      >
+        {L.langEs}
+      </button>
+      <button
+        type="button"
+        class="lang-btn"
+        class:lang-active={locale === "en"}
+        on:click={() => setLocale("en")}
+      >
+        {L.langEn}
+      </button>
+    </div>
+  {/if}
 
   {#if path.startsWith("/check/")}
     <section class="card">
@@ -1510,13 +1550,13 @@ async function handleCancelledPayment() {
     </section>
   {:else}
     <section class="card waiver-form">
-      <h2>Registro de Waiver</h2>
+      <h2>{L.waiverTitle}</h2>
       {#if message}<p class="bad">{message}</p>{/if}
       <div class="form-section">
-        <h3 class="form-section-title">Datos del participante</h3>
+        <h3 class="form-section-title">{L.sectionParticipant}</h3>
         <div class="form-section-body">
           <div class="field-group" class:field-invalid={fieldInvalid("attractionId")}>
-            <label class="field-label" for="atraccion">Atracción</label>
+            <label class="field-label" for="atraccion">{L.attraction}</label>
             <select id="atraccion" bind:value={selectedAttractionId} on:change={() => (selectedAttraction = attractions.find((a) => a._id === selectedAttractionId))}>
               {#each attractions as a}
                 <option value={a._id}>{a.name}</option>
@@ -1524,47 +1564,47 @@ async function handleCancelledPayment() {
             </select>
           </div>
           <div class="field-group" class:field-invalid={fieldInvalid("fullName")}>
-            <label class="field-label" for="fullName">Nombre completo (como en tu INE)</label>
+            <label class="field-label" for="fullName">{L.fullName}</label>
             <input id="fullName" bind:value={form.fullName} autocomplete="name" />
           </div>
           <div class="form-grid-2">
             <div class="field-group" class:field-invalid={fieldInvalid("birthDate")}>
-              <label class="field-label" for="birthDate">Fecha de nacimiento</label>
+              <label class="field-label" for="birthDate">{L.birthDate}</label>
               <input id="birthDate" type="date" bind:value={form.birthDate} />
             </div>
             <div class="field-group" class:field-invalid={fieldInvalid("gender")}>
-              <p class="field-label">Sexo</p>
-              <div class="radio-row" role="radiogroup" aria-label="Sexo">
-                <label><input type="radio" bind:group={form.gender} value="masculino" /> Masculino</label>
-                <label><input type="radio" bind:group={form.gender} value="femenino" /> Femenino</label>
+              <p class="field-label">{L.gender}</p>
+              <div class="radio-row" role="radiogroup" aria-label={L.gender}>
+                <label><input type="radio" bind:group={form.gender} value="masculino" /> {L.male}</label>
+                <label><input type="radio" bind:group={form.gender} value="femenino" /> {L.female}</label>
               </div>
             </div>
           </div>
           <div class="form-grid-2">
             <div class="field-group" class:field-invalid={fieldInvalid("phone")}>
-              <label class="field-label" for="phone">Teléfono</label>
+              <label class="field-label" for="phone">{L.phone}</label>
               <input id="phone" bind:value={form.phone} type="tel" autocomplete="tel" inputmode="tel" />
             </div>
             <div class="field-group" class:field-invalid={fieldInvalid("email")}>
-              <label class="field-label" for="email">Correo electrónico</label>
+              <label class="field-label" for="email">{L.email}</label>
               <input id="email" bind:value={form.email} type="email" autocomplete="email" inputmode="email" />
             </div>
           </div>
           <div class="form-grid-2">
             <div class="field-group" class:field-invalid={fieldInvalid("nationality")}>
-              <label class="field-label" for="nationality">Nacionalidad</label>
+              <label class="field-label" for="nationality">{L.nationality}</label>
               <select id="nationality" bind:value={selectedNationality}>
-                <option value="">Selecciona nacionalidad</option>
+                <option value="">{L.selectNationality}</option>
                 {#each NATIONALITIES as country}
-                  <option value={country}>{country}</option>
+                  <option value={country}>{locale === "en" ? NATIONALITY_EN[country] || country : country}</option>
                 {/each}
               </select>
             </div>
-            {#if selectedNationality === "México"}
+            {#if isMexico}
               <div class="field-group" class:field-invalid={fieldInvalid("state")}>
-                <label class="field-label" for="state">Estado</label>
+                <label class="field-label" for="state">{L.state}</label>
                 <select id="state" bind:value={selectedState} on:change={onLocationStateChange}>
-                  <option value="">Selecciona estado</option>
+                  <option value="">{L.selectState}</option>
                   {#each MEXICO_STATES as state}
                     <option value={state}>{state}</option>
                   {/each}
@@ -1572,50 +1612,50 @@ async function handleCancelledPayment() {
               </div>
             {:else}
               <div class="field-group" class:field-invalid={fieldInvalid("foreignCityState")}>
-                <label class="field-label" for="foreignCityState">Ciudad / Estado</label>
+                <label class="field-label" for="foreignCityState">{L.cityState}</label>
                 <input id="foreignCityState" bind:value={foreignCityState} autocomplete="address-level2" />
               </div>
             {/if}
           </div>
-          {#if selectedNationality === "México"}
+          {#if isMexico}
             <div class="form-grid-2">
               <div class="field-group" class:field-invalid={fieldInvalid("city")}>
-                <label class="field-label" for="city">Ciudad</label>
+                <label class="field-label" for="city">{L.city}</label>
                 <select id="city" bind:value={selectedCity} disabled={!selectedState}>
-                  <option value="">{selectedState ? "Selecciona ciudad" : "Primero elige estado"}</option>
+                  <option value="">{selectedState ? L.selectCity : L.selectStateFirst}</option>
                   {#each availableCities as city}
-                    <option value={city}>{city}</option>
+                    <option value={city}>{city === "Otra" && locale === "en" ? L.otherCity : city}</option>
                   {/each}
                 </select>
               </div>
               {#if selectedCity === "Otra"}
                 <div class="field-group" class:field-invalid={fieldInvalid("customCity")}>
-                  <label class="field-label" for="customCity">Especifica ciudad</label>
+                  <label class="field-label" for="customCity">{L.specifyCity}</label>
                   <input id="customCity" bind:value={customCity} />
                 </div>
               {/if}
             </div>
           {/if}
           <div class="field-group" class:field-invalid={fieldInvalid("takesMedications")}>
-            <label class="field-label" for="takesMedications">¿Toma medicamentos?</label>
+            <label class="field-label" for="takesMedications">{L.takesMedications}</label>
             <select id="takesMedications" bind:value={takesMedications}>
-              <option value="">Selecciona una opción</option>
-              <option value="no">No</option>
-              <option value="yes">Sí</option>
+              <option value="">{L.selectOption}</option>
+              <option value="no">{L.no}</option>
+              <option value="yes">{L.yes}</option>
             </select>
           </div>
           {#if takesMedications === "yes"}
             <div class="field-group" class:field-invalid={fieldInvalid("medications")}>
-              <label class="field-label" for="medications">Medicamento / dosis</label>
-              <input id="medications" bind:value={form.medications} placeholder="Ej. Metformina 500 mg" />
+              <label class="field-label" for="medications">{L.medicationDose}</label>
+              <input id="medications" bind:value={form.medications} placeholder={L.medicationPlaceholder} />
             </div>
             <div class="form-grid-2">
               <div class="field-group" class:field-invalid={fieldInvalid("treatingPhysician")}>
-                <label class="field-label" for="treatingPhysician">Médico tratante</label>
-                <input id="treatingPhysician" bind:value={form.treatingPhysician} placeholder="Nombre del médico" />
+                <label class="field-label" for="treatingPhysician">{L.treatingPhysician}</label>
+                <input id="treatingPhysician" bind:value={form.treatingPhysician} placeholder={L.physicianPlaceholder} />
               </div>
               <div class="field-group" class:field-invalid={fieldInvalid("physicianPhone")}>
-                <label class="field-label" for="physicianPhone">Teléfono del médico</label>
+                <label class="field-label" for="physicianPhone">{L.physicianPhone}</label>
                 <input id="physicianPhone" bind:value={form.physicianPhone} type="tel" inputmode="tel" />
               </div>
             </div>
@@ -1624,34 +1664,34 @@ async function handleCancelledPayment() {
       </div>
 
       <div class="form-section">
-        <h3 class="form-section-title">Referencias familiares</h3>
+        <h3 class="form-section-title">{L.sectionReferences}</h3>
         <div class="form-section-body">
           <div class="form-grid-2 family-refs-grid">
             <div class="family-ref-col">
               <div class="field-group" class:field-invalid={fieldInvalid("emergencyContactName")}>
-                <label class="field-label" for="emergencyName">Referencia 1 — Nombre</label>
+                <label class="field-label" for="emergencyName">{L.ref1Name}</label>
                 <input id="emergencyName" bind:value={form.emergencyContactName} autocomplete="name" />
               </div>
               <div class="field-group" class:field-invalid={fieldInvalid("emergencyContactRelationship")}>
-                <label class="field-label" for="emergencyRelationship">Referencia 1 — Parentesco</label>
-                <input id="emergencyRelationship" bind:value={form.emergencyContactRelationship} placeholder="Ej. padre, madre, cónyuge" />
+                <label class="field-label" for="emergencyRelationship">{L.ref1Relationship}</label>
+                <input id="emergencyRelationship" bind:value={form.emergencyContactRelationship} placeholder={L.relationshipPlaceholder1} />
               </div>
               <div class="field-group" class:field-invalid={fieldInvalid("emergencyContactPhone")}>
-                <label class="field-label" for="emergencyPhone">Referencia 1 — Teléfono</label>
+                <label class="field-label" for="emergencyPhone">{L.ref1Phone}</label>
                 <input id="emergencyPhone" bind:value={form.emergencyContactPhone} type="tel" autocomplete="tel" inputmode="tel" />
               </div>
             </div>
             <div class="family-ref-col">
               <div class="field-group" class:field-invalid={fieldInvalid("familyReference2Name")}>
-                <label class="field-label" for="familyRef2Name">Referencia 2 — Nombre</label>
+                <label class="field-label" for="familyRef2Name">{L.ref2Name}</label>
                 <input id="familyRef2Name" bind:value={form.familyReference2Name} autocomplete="name" />
               </div>
               <div class="field-group" class:field-invalid={fieldInvalid("familyReference2Relationship")}>
-                <label class="field-label" for="familyRef2Relationship">Referencia 2 — Parentesco</label>
-                <input id="familyRef2Relationship" bind:value={form.familyReference2Relationship} placeholder="Ej. hermano, tío" />
+                <label class="field-label" for="familyRef2Relationship">{L.ref2Relationship}</label>
+                <input id="familyRef2Relationship" bind:value={form.familyReference2Relationship} placeholder={L.relationshipPlaceholder2} />
               </div>
               <div class="field-group" class:field-invalid={fieldInvalid("familyReference2Phone")}>
-                <label class="field-label" for="familyRef2Phone">Referencia 2 — Teléfono</label>
+                <label class="field-label" for="familyRef2Phone">{L.ref2Phone}</label>
                 <input id="familyRef2Phone" bind:value={form.familyReference2Phone} type="tel" inputmode="tel" />
               </div>
             </div>
@@ -1660,43 +1700,43 @@ async function handleCancelledPayment() {
       </div>
 
       <div class="form-section">
-        <h3 class="form-section-title">Declaraciones</h3>
+        <h3 class="form-section-title">{L.sectionDeclarations}</h3>
         <div class="form-section-body">
           {#if isMinor}
-            <p class="bad">Participante menor de edad: se requiere tutor y firma manuscrita del tutor.</p>
+            <p class="bad">{L.minorNotice}</p>
             <button type="button" on:click={() => (guardianModalOpen = true)}>
-              {hasRequiredGuardianFields() ? "Editar datos de tutor" : "Capturar datos de tutor"}
+              {hasRequiredGuardianFields() ? L.editGuardian : L.captureGuardian}
             </button>
           {/if}
           <div class="checkbox-group">
-            <label class="checkbox-label"><input type="checkbox" bind:checked={form.hasMedicalCondition} /> Tengo condición médica relevante</label>
-            <label class="checkbox-label"><input type="checkbox" bind:checked={form.consumedAlcoholOrDrugs} /> Consumí alcohol o drogas hoy</label>
-            <label class="checkbox-label" class:field-invalid={fieldInvalid("acceptsSafetyRules")}><input type="checkbox" bind:checked={form.acceptsSafetyRules} /> Acepto reglas de seguridad</label>
+            <label class="checkbox-label"><input type="checkbox" bind:checked={form.hasMedicalCondition} /> {L.medicalCondition}</label>
+            <label class="checkbox-label"><input type="checkbox" bind:checked={form.consumedAlcoholOrDrugs} /> {L.alcoholToday}</label>
+            <label class="checkbox-label" class:field-invalid={fieldInvalid("acceptsSafetyRules")}><input type="checkbox" bind:checked={form.acceptsSafetyRules} /> {L.safetyRules}</label>
           </div>
         </div>
       </div>
 
       <div class="form-section">
-        <h3 class="form-section-title">Carta responsiva</h3>
+        <h3 class="form-section-title">{L.sectionWaiver}</h3>
         <div class="form-section-body">
-          <WaiverTextView content={selectedAttraction?.waiverText || ""} />
-          <label class="checkbox-label" class:field-invalid={fieldInvalid("acceptedText")}><input type="checkbox" bind:checked={form.acceptedText} /> Leí y acepto la carta responsiva</label>
+          <WaiverTextView content={displayWaiverText} />
+          <label class="checkbox-label" class:field-invalid={fieldInvalid("acceptedText")}><input type="checkbox" bind:checked={form.acceptedText} /> {L.acceptWaiver}</label>
         </div>
       </div>
 
       <div class="form-section">
-        <h3 class="form-section-title">Firmas</h3>
+        <h3 class="form-section-title">{L.sectionSignatures}</h3>
         <div class="form-section-body">
           <div class="form-grid-2 signature-grid">
             <div class="field-group signature-block" class:field-invalid={fieldInvalid("signatureImage")}>
-              <p class="signature-label"><b>Firma del participante</b> <span class="signature-hint">(mouse, dedo o stylus)</span></p>
+              <p class="signature-label"><b>{L.participantSignature}</b> <span class="signature-hint">{L.signatureHint}</span></p>
               <canvas class="signature-pad" bind:this={signatureCanvas} use:signaturePad width="700" height="180"></canvas>
-              <button type="button" class="signature-clear" on:click={clearSignature}>Limpiar firma participante</button>
+              <button type="button" class="signature-clear" on:click={clearSignature}>{L.clearParticipantSig}</button>
             </div>
             <div class="field-group signature-block" class:field-invalid={fieldInvalid("witnessSignatureImage")}>
-              <p class="signature-label"><b>Firma del testigo</b> <span class="signature-hint">(mouse, dedo o stylus)</span></p>
+              <p class="signature-label"><b>{L.witnessSignature}</b> <span class="signature-hint">{L.signatureHint}</span></p>
               <canvas class="signature-pad" bind:this={witnessSignatureCanvas} use:witnessSignaturePad width="700" height="180"></canvas>
-              <button type="button" class="signature-clear" on:click={clearWitnessSignature}>Limpiar firma testigo</button>
+              <button type="button" class="signature-clear" on:click={clearWitnessSignature}>{L.clearWitnessSig}</button>
             </div>
           </div>
         </div>
@@ -1704,31 +1744,31 @@ async function handleCancelledPayment() {
       <button class="submit-waiver" on:click={submitWaiver} disabled={loading}>
         {loading
           ? requiresStripePayment
-            ? "Redirigiendo al pago..."
-            : "Registrando waiver..."
+            ? L.redirectingPayment
+            : L.registering
           : requiresStripePayment
-            ? "Firmar y pagar"
-            : "Firmar waiver"}
+            ? L.signAndPay
+            : L.signWaiver}
       </button>
     </section>
 
     {#if guardianModalOpen}
       <section class="modal-backdrop">
         <div class="modal-card">
-          <h3>Datos de tutor o padre/madre</h3>
-          <label class="field-label" for="guardianName">Nombre completo del tutor</label>
+          <h3>{L.guardianTitle}</h3>
+          <label class="field-label" for="guardianName">{L.guardianName}</label>
           <input id="guardianName" bind:value={guardian.fullName} autocomplete="name" />
-          <label class="field-label" for="guardianRelation">Parentesco</label>
-          <input id="guardianRelation" bind:value={guardian.relation} placeholder="Ej. padre, madre, tutor legal" />
-          <label class="field-label" for="guardianPhone">Teléfono del tutor</label>
+          <label class="field-label" for="guardianRelation">{L.guardianRelation}</label>
+          <input id="guardianRelation" bind:value={guardian.relation} placeholder={L.guardianRelationPlaceholder} />
+          <label class="field-label" for="guardianPhone">{L.guardianPhone}</label>
           <input id="guardianPhone" bind:value={guardian.phone} type="tel" autocomplete="tel" />
-          <label class="field-label" for="guardianEmail">Correo electrónico del tutor</label>
+          <label class="field-label" for="guardianEmail">{L.guardianEmail}</label>
           <input id="guardianEmail" bind:value={guardian.email} type="email" autocomplete="email" />
-          <p><b>Firma manuscrita del tutor</b></p>
+          <p><b>{L.guardianSig}</b></p>
           <canvas class="signature-pad" bind:this={guardianSignatureCanvas} use:guardianSignaturePad width="700" height="180"></canvas>
           <div class="modal-actions">
-            <button type="button" on:click={clearGuardianSignature}>Limpiar firma tutor</button>
-            <button type="button" on:click={saveGuardianModal}>Guardar datos tutor</button>
+            <button type="button" on:click={clearGuardianSignature}>{L.clearGuardianSig}</button>
+            <button type="button" on:click={saveGuardianModal}>{L.saveGuardian}</button>
           </div>
         </div>
       </section>
@@ -1737,18 +1777,18 @@ async function handleCancelledPayment() {
     {#if waiverResult}
       <section class="modal-backdrop">
         <div class="modal-card">
-          <h2>Waiver firmado</h2>
-          <p><b>Folio:</b> {waiverResult.waiverId}</p>
-          <p><b>Firmado:</b> {new Date(waiverResult.signedAt).toLocaleString()}</p>
-          <p><b>Código QR de validación</b></p>
+          <h2>{L.waiverSigned}</h2>
+          <p><b>{L.folio}:</b> {waiverResult.waiverId}</p>
+          <p><b>{L.signedAt}:</b> {new Date(waiverResult.signedAt).toLocaleString(locale === "en" ? "en-US" : "es-MX")}</p>
+          <p><b>{L.qrTitle}</b></p>
           <canvas bind:this={qrCanvas}></canvas>
           <p class="modal-help">
-            Muestra este QR al personal para validar tu acceso a la atracción.
+            {L.qrHelp}
           </p>
           {#if waiverResult.emailSent}
-            <p class="ok">También enviamos este QR al correo registrado.</p>
+            <p class="ok">{L.emailSent}</p>
           {/if}
-          <button type="button" on:click={resetRegistrationFlow}>Aceptar</button>
+          <button type="button" on:click={resetRegistrationFlow}>{L.accept}</button>
         </div>
       </section>
     {/if}
@@ -1797,6 +1837,29 @@ async function handleCancelledPayment() {
     padding: 3px;
   }
   h1 { font-size: 20px; margin: 0; }
+  .lang-switch {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 16px;
+  }
+  .lang-btn {
+    padding: 18px 12px;
+    font-size: 18px;
+    font-weight: 700;
+    border-radius: 10px;
+    border: 2px solid #1f4a3b;
+    background: #fffaf3;
+    color: #1f4a3b;
+    cursor: pointer;
+    text-align: center;
+    box-shadow: 0 4px 12px rgba(31, 74, 59, 0.08);
+  }
+  .lang-btn.lang-active {
+    background: #1f4a3b;
+    color: #f8f3e9;
+    border-color: #1f4a3b;
+  }
   nav {
     display: flex;
     gap: 8px;

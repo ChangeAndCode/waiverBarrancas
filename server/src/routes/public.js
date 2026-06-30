@@ -5,6 +5,7 @@ import { Waiver } from "../models/Waiver.js";
 import { WaiverDraft } from "../models/WaiverDraft.js";
 import { signWaiverToken, verifyWaiverToken } from "../lib/token.js";
 import { renderWaiverTextForSignature } from "../lib/waiverText.js";
+import { WAIVER_TEXT_EN_HTML } from "../lib/waiverTextEn.js";
 import { canSendEmails, sendWaiverQrEmail } from "../lib/email.js";
 import { nowMs, perfLog } from "../lib/perf.js";
 import Stripe from "stripe";
@@ -174,7 +175,8 @@ export function publicRoutes({ jwtSecret }) {
       signatureName,
       signatureImage,
       guardian,
-      witness
+      witness,
+      locale
     } = req.body ?? {};
 
     if (!attractionId || !participant || !answers || acceptedText !== true || !signatureName || !signatureImage) {
@@ -247,6 +249,10 @@ export function publicRoutes({ jwtSecret }) {
     if (!attraction) return res.status(404).json({ error: "Atracción no encontrada." });
 
     const signedAt = new Date();
+    const waiverTextSource =
+      String(locale || "").trim().toLowerCase() === "en"
+        ? WAIVER_TEXT_EN_HTML
+        : attraction.waiverText;
     const createWaiverAt = nowMs();
     const waiver = await Waiver.create({
       attractionId: attraction._id,
@@ -259,7 +265,7 @@ export function publicRoutes({ jwtSecret }) {
       signatureName,
       signatureImage,
       witness,
-      waiverTextSnapshot: renderWaiverTextForSignature(attraction.waiverText, signedAt)
+      waiverTextSnapshot: renderWaiverTextForSignature(waiverTextSource, signedAt)
     });
     perfLog("db_query", {
       operation: "waiver_create",
