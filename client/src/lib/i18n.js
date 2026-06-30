@@ -17,7 +17,7 @@ export const NATIONALITY_EN = {
 
 export const messages = {
   es: {
-    siteTitle: "Waiver Digital - Parque Temático",
+    siteTitle: "Carta Responsiva - Parque Barrancas",
     admin: "Admin",
     logout: "Salir",
   langEs: "Español",
@@ -103,7 +103,7 @@ export const messages = {
     paymentCancelled: "El pago fue cancelado. Puedes revisar tus datos e intentarlo de nuevo."
   },
   en: {
-    siteTitle: "Digital Waiver - Theme Park",
+    siteTitle: "Digital Waiver - Parque Barrancas",
     admin: "Admin",
     logout: "Log out",
     langEs: "Español",
