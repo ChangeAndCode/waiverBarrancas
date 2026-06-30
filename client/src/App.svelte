@@ -1561,8 +1561,8 @@ async function handleCancelledPayment() {
             src={locale === "en" ? waiverIsoEn : waiverIsoEs}
             alt=""
             class="waiver-iso-code"
-            width="283"
-            height="128"
+            width="142"
+            height="64"
           />
         </div>
         <div class="form-section-body">
@@ -1935,8 +1935,8 @@ async function handleCancelledPayment() {
     min-width: 0;
   }
   .waiver-form .waiver-iso-code {
-    width: 283px;
-    height: 128px;
+    width: 142px;
+    height: 64px;
     object-fit: contain;
     object-position: right center;
     flex-shrink: 0;
