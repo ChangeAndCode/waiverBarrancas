@@ -55,9 +55,6 @@ export function collectWaiverFieldErrors({
   if (!meaningfulText(form.emergencyContactName)) errors.emergencyContactName = true;
   if (!meaningfulText(form.emergencyContactRelationship)) errors.emergencyContactRelationship = true;
   if (!meaningfulText(form.emergencyContactPhone, PHONE_MIN_LENGTH)) errors.emergencyContactPhone = true;
-  if (!meaningfulText(form.familyReference2Name)) errors.familyReference2Name = true;
-  if (!meaningfulText(form.familyReference2Relationship)) errors.familyReference2Relationship = true;
-  if (!meaningfulText(form.familyReference2Phone, PHONE_MIN_LENGTH)) errors.familyReference2Phone = true;
 
   if (form.acceptsSafetyRules !== true) errors.acceptsSafetyRules = true;
   if (form.acceptedText !== true) errors.acceptedText = true;

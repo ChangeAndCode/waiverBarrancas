@@ -5,6 +5,7 @@ import { Waiver } from "../models/Waiver.js";
 import { User } from "../models/User.js";
 import { requireAuth, requireRoles } from "../lib/auth.js";
 import { nowMs, perfLog } from "../lib/perf.js";
+import { waiverDisplayId } from "../lib/folio.js";
 
 const MAX_CSV_ROWS = 50000;
 const waiverSelectLean =
@@ -43,7 +44,7 @@ function csvCell(v) {
 
 function mapWaiverRow(w) {
   return {
-    id: w._id,
+    id: waiverDisplayId(w),
     attractionId: w.attractionId,
     attractionName: w.attractionName,
     fullName: w.participant?.fullName,

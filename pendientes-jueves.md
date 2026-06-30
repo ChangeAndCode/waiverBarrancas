@@ -16,11 +16,12 @@
 - Codigo de iso justo a registro de waiver
 - [x] boton ingles y español 
 - codigo iso diferente entre waiver en ingles y español
-- solo una referencia obligatoria
-- Leyenda (Que no esté contigo en )
+- [x] solo una referencia obligatoria, de momento pide 2 obligatoriamente
+- [x] en la referencia tiene que venir tambien una pequeña Leyenda "Que no se encuentre físicamente contigo"
 - nombre completo del cliente, actividad, residente del estado, y le pide la identificacion
-- folio (mas corto porque ahorita trae el foliotote)
-- con el ticket de caja se revisa que la carta responsiva sea de la persona y el ticket
-- folio de 6 digitos PB1234 
+- [x] folio (mas corto porque ahorita trae el foliotote)
+- [x] con el ticket de caja se revisa que la carta responsiva sea de la persona y el ticket
+- [x] folio de 6 digitos PB1234 
+- [x] el campo para escribir los medicamentos que toma  solo se activa si el radio button de toma de medicamentos
 - ver si se va a conectar con la base de datos
-- toma medicamentos solo se activa si si toma medicamentos
+

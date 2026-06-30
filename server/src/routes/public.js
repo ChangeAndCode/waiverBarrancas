@@ -6,6 +6,7 @@ import { WaiverDraft } from "../models/WaiverDraft.js";
 import { signWaiverToken, verifyWaiverToken } from "../lib/token.js";
 import { renderWaiverTextForSignature } from "../lib/waiverText.js";
 import { WAIVER_TEXT_EN_HTML } from "../lib/waiverTextEn.js";
+import { generateWaiverFolio, waiverDisplayId } from "../lib/folio.js";
 import { canSendEmails, sendWaiverQrEmail } from "../lib/email.js";
 import { nowMs, perfLog } from "../lib/perf.js";
 import Stripe from "stripe";
@@ -205,10 +206,7 @@ export function publicRoutes({ jwtSecret }) {
           meaningfulText(participant.physicianPhone, 7))) &&
       meaningfulText(participant.emergencyContactRelationship) &&
       meaningfulText(participant.emergencyContactName) &&
-      meaningfulText(participant.emergencyContactPhone, 7) &&
-      meaningfulText(participant.familyReference2Name) &&
-      meaningfulText(participant.familyReference2Relationship) &&
-      meaningfulText(participant.familyReference2Phone, 7);
+      meaningfulText(participant.emergencyContactPhone, 7);
     if (!extendedParticipant) {
       return res.status(400).json({ error: "Faltan campos adicionales del participante." });
     }
@@ -253,8 +251,10 @@ export function publicRoutes({ jwtSecret }) {
       String(locale || "").trim().toLowerCase() === "en"
         ? WAIVER_TEXT_EN_HTML
         : attraction.waiverText;
+    const folio = await generateWaiverFolio();
     const createWaiverAt = nowMs();
     const waiver = await Waiver.create({
+      folio,
       attractionId: attraction._id,
       attractionName: attraction.name,
       participant,
@@ -279,7 +279,8 @@ export function publicRoutes({ jwtSecret }) {
     const emailSent = canSendEmails();
 
     res.status(201).json({
-      waiverId: waiver._id,
+      folio: waiver.folio,
+      waiverId: waiver.folio,
       token,
       qrUrl,
       emailSent,
@@ -295,7 +296,7 @@ export function publicRoutes({ jwtSecret }) {
             to: participant.email,
             participantName: participant.fullName,
             attractionName: attraction.name,
-            waiverId: waiver._id.toString(),
+            waiverId: waiver.folio,
             signedAt,
             qrUrl,
             qrImageUrl,
@@ -341,7 +342,7 @@ export function publicRoutes({ jwtSecret }) {
       return res.json({
         valid: true,
         waiver: {
-          id: waiver._id,
+          id: waiverDisplayId(waiver),
           attractionName: waiver.attractionName,
           fullName: waiver.participant.fullName,
           birthDate: waiver.participant.birthDate,

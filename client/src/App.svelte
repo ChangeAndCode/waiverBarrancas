@@ -1304,6 +1304,7 @@ async function handleCancelledPayment() {
           <p><b>Nombre:</b> {staffScanResult.waiver.fullName}</p>
           <p><b>Atracción:</b> {staffScanResult.waiver.attractionName}</p>
           <p><b>Folio:</b> {staffScanResult.waiver.id}</p>
+          <p class="staff-reminder">Verificar que el ticket de caja corresponda a esta persona y a esta carta responsiva.</p>
         </div>
       {:else if staffScanResult?.reason === "qr_already_used"}
         <div class="staff-scan-result">
@@ -1648,12 +1649,11 @@ async function handleCancelledPayment() {
             </div>
           {/if}
           <div class="field-group" class:field-invalid={fieldInvalid("takesMedications")}>
-            <label class="field-label" for="takesMedications">{L.takesMedications}</label>
-            <select id="takesMedications" bind:value={takesMedications}>
-              <option value="">{L.selectOption}</option>
-              <option value="no">{L.no}</option>
-              <option value="yes">{L.yes}</option>
-            </select>
+            <p class="field-label">{L.takesMedications}</p>
+            <div class="radio-row" role="radiogroup" aria-label={L.takesMedications}>
+              <label><input type="radio" bind:group={takesMedications} value="no" /> {L.no}</label>
+              <label><input type="radio" bind:group={takesMedications} value="yes" /> {L.yes}</label>
+            </div>
           </div>
           {#if takesMedications === "yes"}
             <div class="field-group" class:field-invalid={fieldInvalid("medications")}>
@@ -1677,34 +1677,34 @@ async function handleCancelledPayment() {
       <div class="form-section">
         <h3 class="form-section-title">{L.sectionReferences}</h3>
         <div class="form-section-body">
-          <div class="form-grid-2 family-refs-grid">
-            <div class="family-ref-col">
-              <div class="field-group" class:field-invalid={fieldInvalid("emergencyContactName")}>
-                <label class="field-label" for="emergencyName">{L.ref1Name}</label>
-                <input id="emergencyName" bind:value={form.emergencyContactName} autocomplete="name" />
-              </div>
-              <div class="field-group" class:field-invalid={fieldInvalid("emergencyContactRelationship")}>
-                <label class="field-label" for="emergencyRelationship">{L.ref1Relationship}</label>
-                <input id="emergencyRelationship" bind:value={form.emergencyContactRelationship} placeholder={L.relationshipPlaceholder1} />
-              </div>
-              <div class="field-group" class:field-invalid={fieldInvalid("emergencyContactPhone")}>
-                <label class="field-label" for="emergencyPhone">{L.ref1Phone}</label>
-                <input id="emergencyPhone" bind:value={form.emergencyContactPhone} type="tel" autocomplete="tel" inputmode="tel" />
-              </div>
+          <p class="reference-legend">{L.referenceLegend}</p>
+          <div class="family-ref-col">
+            <div class="field-group" class:field-invalid={fieldInvalid("emergencyContactName")}>
+              <label class="field-label" for="emergencyName">{L.ref1Name}</label>
+              <input id="emergencyName" bind:value={form.emergencyContactName} autocomplete="name" />
             </div>
-            <div class="family-ref-col">
-              <div class="field-group" class:field-invalid={fieldInvalid("familyReference2Name")}>
-                <label class="field-label" for="familyRef2Name">{L.ref2Name}</label>
-                <input id="familyRef2Name" bind:value={form.familyReference2Name} autocomplete="name" />
-              </div>
-              <div class="field-group" class:field-invalid={fieldInvalid("familyReference2Relationship")}>
-                <label class="field-label" for="familyRef2Relationship">{L.ref2Relationship}</label>
-                <input id="familyRef2Relationship" bind:value={form.familyReference2Relationship} placeholder={L.relationshipPlaceholder2} />
-              </div>
-              <div class="field-group" class:field-invalid={fieldInvalid("familyReference2Phone")}>
-                <label class="field-label" for="familyRef2Phone">{L.ref2Phone}</label>
-                <input id="familyRef2Phone" bind:value={form.familyReference2Phone} type="tel" inputmode="tel" />
-              </div>
+            <div class="field-group" class:field-invalid={fieldInvalid("emergencyContactRelationship")}>
+              <label class="field-label" for="emergencyRelationship">{L.ref1Relationship}</label>
+              <input id="emergencyRelationship" bind:value={form.emergencyContactRelationship} placeholder={L.relationshipPlaceholder1} />
+            </div>
+            <div class="field-group" class:field-invalid={fieldInvalid("emergencyContactPhone")}>
+              <label class="field-label" for="emergencyPhone">{L.ref1Phone}</label>
+              <input id="emergencyPhone" bind:value={form.emergencyContactPhone} type="tel" autocomplete="tel" inputmode="tel" />
+            </div>
+          </div>
+          <p class="ref2-section-label">{L.ref2Section}</p>
+          <div class="family-ref-col">
+            <div class="field-group">
+              <label class="field-label" for="familyRef2Name">{L.ref2Name}</label>
+              <input id="familyRef2Name" bind:value={form.familyReference2Name} autocomplete="name" />
+            </div>
+            <div class="field-group">
+              <label class="field-label" for="familyRef2Relationship">{L.ref2Relationship}</label>
+              <input id="familyRef2Relationship" bind:value={form.familyReference2Relationship} placeholder={L.relationshipPlaceholder2} />
+            </div>
+            <div class="field-group">
+              <label class="field-label" for="familyRef2Phone">{L.ref2Phone}</label>
+              <input id="familyRef2Phone" bind:value={form.familyReference2Phone} type="tel" inputmode="tel" />
             </div>
           </div>
         </div>
@@ -1789,7 +1789,7 @@ async function handleCancelledPayment() {
       <section class="modal-backdrop">
         <div class="modal-card">
           <h2>{L.waiverSigned}</h2>
-          <p><b>{L.folio}:</b> {waiverResult.waiverId}</p>
+          <p><b>{L.folio}:</b> {waiverResult.folio || waiverResult.waiverId}</p>
           <p><b>{L.signedAt}:</b> {new Date(waiverResult.signedAt).toLocaleString(locale === "en" ? "en-US" : "es-MX")}</p>
           <p><b>{L.qrTitle}</b></p>
           <canvas bind:this={qrCanvas}></canvas>
@@ -1944,6 +1944,25 @@ async function handleCancelledPayment() {
   .waiver-form .form-section-body {
     display: grid;
     gap: 12px;
+  }
+  .reference-legend {
+    margin: 0;
+    font-size: 13px;
+    font-style: italic;
+    color: #5a6b62;
+    line-height: 1.35;
+  }
+  .ref2-section-label {
+    margin: 4px 0 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #1f4a3b;
+  }
+  .staff-reminder {
+    margin: 0;
+    font-size: 13px;
+    color: #5a4a32;
+    line-height: 1.4;
   }
   .waiver-form .field-group {
     display: grid;

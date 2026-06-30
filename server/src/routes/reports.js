@@ -3,6 +3,7 @@ import { requireAuth, requireRoles } from "../lib/auth.js";
 import { Waiver } from "../models/Waiver.js";
 import { verifyWaiverToken } from "../lib/token.js";
 import { nowMs, perfLog } from "../lib/perf.js";
+import { waiverDisplayId } from "../lib/folio.js";
 
 export function reportRoutes({ jwtSecret }) {
   const router = Router();
@@ -66,7 +67,7 @@ export function reportRoutes({ jwtSecret }) {
       return res.json({
         valid: true,
         waiver: {
-          id: consumed._id,
+          id: waiverDisplayId(consumed),
           attractionName: consumed.attractionName,
           fullName: consumed.participant.fullName,
           birthDate: consumed.participant.birthDate,
@@ -112,7 +113,7 @@ export function reportRoutes({ jwtSecret }) {
       summary: { total, signed, revoked },
       byAttraction,
       waivers: waivers.map((w) => ({
-        id: w._id,
+        id: waiverDisplayId(w),
         attractionName: w.attractionName,
         fullName: w.participant.fullName,
         email: w.participant.email,
