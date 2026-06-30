@@ -2,6 +2,8 @@
   import { onDestroy, tick } from "svelte";
   import QRCode from "qrcode";
   import logoBarrancas from "../logobarrancas.png";
+  import waiverIsoEs from "../waiverISOesp.png";
+  import waiverIsoEn from "../WaiverISOingles.png";
   import WaiverTextEditor from "./components/WaiverTextEditor.svelte";
   import WaiverTextView from "./components/WaiverTextView.svelte";
   import { isWaiverTextEmpty } from "./lib/waiverHtml.js";
@@ -1553,7 +1555,16 @@ async function handleCancelledPayment() {
       <h2>{L.waiverTitle}</h2>
       {#if message}<p class="bad">{message}</p>{/if}
       <div class="form-section">
-        <h3 class="form-section-title">{L.sectionParticipant}</h3>
+        <div class="form-section-header form-section-header-with-iso">
+          <h3 class="form-section-title form-section-title-inline">{L.sectionParticipant}</h3>
+          <img
+            src={locale === "en" ? waiverIsoEn : waiverIsoEs}
+            alt=""
+            class="waiver-iso-code"
+            width="283"
+            height="128"
+          />
+        </div>
         <div class="form-section-body">
           <div class="field-group" class:field-invalid={fieldInvalid("attractionId")}>
             <label class="field-label" for="atraccion">{L.attraction}</label>
@@ -1908,6 +1919,27 @@ async function handleCancelledPayment() {
     padding-bottom: 10px;
     border-bottom: 1px solid #ebdfcc;
     line-height: 1.3;
+  }
+  .waiver-form .form-section-header-with-iso {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #ebdfcc;
+  }
+  .waiver-form .form-section-title-inline {
+    padding-bottom: 0;
+    border-bottom: none;
+    flex: 1;
+    min-width: 0;
+  }
+  .waiver-form .waiver-iso-code {
+    width: 283px;
+    height: 128px;
+    object-fit: contain;
+    object-position: right center;
+    flex-shrink: 0;
   }
   .waiver-form .form-section-body {
     display: grid;

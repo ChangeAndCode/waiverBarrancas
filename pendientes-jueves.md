@@ -8,13 +8,13 @@
 ## Caja y pago
 
 - Al crear la atracción, poder definir **precio** por atracción
-- El QR debe servir no solo como waiver, sino para **escanear en caja** con un lector y mostrar directo lo capturado en el waiver para cobrarlo
+- El QR debe servir no solo como waiver, sino para **escanear en caja** con un lector, o capturar manualmente la orden y registrarla en soft restaurant y mostrar directo lo capturado en el waiver para cobrarlo
 - **Preguntar al cliente:** ¿el pago es aparte por persona o va ligado a cada atracción?
 - Al guardar el waiver, registrar un nuevo campo **`pagado`** (inicialmente `false`); al escanearlo en caja, pasar a `true`
 
 
 - Codigo de iso justo a registro de waiver
-- boton ingles y español 
+- [x] boton ingles y español 
 - codigo iso diferente entre waiver en ingles y español
 - solo una referencia obligatoria
 - Leyenda (Que no esté contigo en )
