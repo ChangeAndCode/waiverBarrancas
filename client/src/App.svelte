@@ -37,8 +37,7 @@
   let authUser = JSON.parse(localStorage.getItem("authUser") || "null");
 
   let attractions = [];
-  let selectedAttractionId = "";
-  let selectedAttraction = null;
+  let selectedParkAttractions = {};
   let waiverResult = null;
   let checkData = null;
   let paymentSuccessInFlight = false;
@@ -86,8 +85,8 @@ let form = {
   familyReference2Name: "",
   familyReference2Relationship: "",
   familyReference2Phone: "",
-  hasMedicalCondition: false,
-  consumedAlcoholOrDrugs: false,
+  declaresNoMedicalRisk: false,
+  declaresNoAlcoholOrDrugs: false,
   acceptsSafetyRules: true,
   acceptedText: false
 };
@@ -112,9 +111,22 @@ let form = {
   $: L = getMessages(locale);
   $: isPublicWaiverUi =
     !path.startsWith("/check/") && path !== "/staff" && path !== "/admin";
+  $: selectedAttractions = attractions.filter((a) => selectedParkAttractions[a._id]);
+  $: selectedAttraction = selectedAttractions[0] || attractions[0] || null;
   $: displayWaiverText =
-    locale === "en" ? WAIVER_TEXT_EN_HTML : selectedAttraction?.waiverText || "";
+    locale === "en" ? WAIVER_TEXT_EN_HTML : selectedAttraction?.waiverText || attractions[0]?.waiverText || "";
   $: isMexico = selectedNationality === "México";
+
+  function toggleParkAttraction(attractionId, checked) {
+    selectedParkAttractions = { ...selectedParkAttractions, [attractionId]: checked };
+  }
+
+  function getSelectedParkAttractionState() {
+    const ids = attractions
+      .filter((a) => selectedParkAttractions[a._id])
+      .map((a) => a._id);
+    return { ids };
+  }
 
   function setLocale(next) {
     if (next !== "en" && next !== "es") return;
@@ -136,7 +148,9 @@ let form = {
 
   $: participantAge = getAge(form.birthDate);
   $: isMinor = participantAge !== null && participantAge < 18;
-  $: requiresStripePayment = selectedAttraction?.stripeEnabled === true;
+  $: requiresStripePayment = selectedAttractions
+    .filter(Boolean)
+    .some((a) => a.stripeEnabled === true);
 
   function signaturePad(node) {
     const ctx = node.getContext("2d");
@@ -504,8 +518,8 @@ let form = {
       familyReference2Name: "",
       familyReference2Relationship: "",
       familyReference2Phone: "",
-      hasMedicalCondition: false,
-      consumedAlcoholOrDrugs: false,
+      declaresNoMedicalRisk: false,
+      declaresNoAlcoholOrDrugs: false,
       acceptsSafetyRules: true,
       acceptedText: false
     };
@@ -517,6 +531,7 @@ let form = {
     };
     guardianSignaturePng = "";
     guardianModalOpen = false;
+    selectedParkAttractions = Object.fromEntries(attractions.map((a) => [a._id, false]));
     takesMedications = "";
     selectedNationality = "México";
     selectedState = "";
@@ -566,9 +581,10 @@ let form = {
   function validateWaiverForm() {
     syncParticipantLocationFields();
     prepareMedicationFields();
+    const { ids } = getSelectedParkAttractionState();
     fieldErrors = collectWaiverFieldErrors({
       form,
-      selectedAttractionId,
+      selectedAttractionIds: ids,
       takesMedications,
       selectedNationality,
       selectedState,
@@ -630,8 +646,11 @@ let form = {
 
   async function loadPublicAttractions() {
     attractions = await api("/public/attractions");
-    if (!selectedAttractionId && attractions.length) selectedAttractionId = attractions[0]._id;
-    selectedAttraction = attractions.find((a) => a._id === selectedAttractionId) || null;
+    const next = { ...selectedParkAttractions };
+    for (const attraction of attractions) {
+      if (!(attraction._id in next)) next[attraction._id] = false;
+    }
+    selectedParkAttractions = next;
   }
 
   let waiverSubmitInFlight = false;
@@ -675,8 +694,11 @@ let form = {
       const guardianSignatureImage =
         guardianSignaturePng || guardianSignatureCanvas?.toDataURL("image/png");
 
+      const { ids: selectedAttractionIds } = getSelectedParkAttractionState();
+
       const pendingWaiverPayload = {
-        attractionId: selectedAttractionId,
+        attractionId: selectedAttractionIds[0],
+        attractionIds: selectedAttractionIds,
         participant: {
           fullName: form.fullName,
           birthDate: form.birthDate,
@@ -696,8 +718,8 @@ let form = {
           familyReference2Phone: form.familyReference2Phone
         },
         answers: {
-          hasMedicalCondition: form.hasMedicalCondition,
-          consumedAlcoholOrDrugs: form.consumedAlcoholOrDrugs,
+          hasMedicalCondition: false,
+          consumedAlcoholOrDrugs: false,
           acceptsSafetyRules: form.acceptsSafetyRules
         },
         acceptedText: form.acceptedText,
@@ -1567,12 +1589,19 @@ async function handleCancelledPayment() {
         </div>
         <div class="form-section-body">
           <div class="field-group" class:field-invalid={fieldInvalid("attractionId")}>
-            <label class="field-label" for="atraccion">{L.attraction}</label>
-            <select id="atraccion" bind:value={selectedAttractionId} on:change={() => (selectedAttraction = attractions.find((a) => a._id === selectedAttractionId))}>
-              {#each attractions as a}
-                <option value={a._id}>{a.name}</option>
+            <p class="field-label">{L.attraction}</p>
+            <div class="checkbox-group park-attractions-group">
+              {#each attractions as attraction (attraction._id)}
+                <label class="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={selectedParkAttractions[attraction._id]}
+                    on:change={(e) => toggleParkAttraction(attraction._id, e.target.checked)}
+                  />
+                  {attraction.name}
+                </label>
               {/each}
-            </select>
+            </div>
           </div>
           <div class="field-group" class:field-invalid={fieldInvalid("fullName")}>
             <label class="field-label" for="fullName">{L.fullName}</label>
@@ -1719,8 +1748,8 @@ async function handleCancelledPayment() {
             </button>
           {/if}
           <div class="checkbox-group">
-            <label class="checkbox-label"><input type="checkbox" bind:checked={form.hasMedicalCondition} /> {L.medicalCondition}</label>
-            <label class="checkbox-label"><input type="checkbox" bind:checked={form.consumedAlcoholOrDrugs} /> {L.alcoholToday}</label>
+            <label class="checkbox-label" class:field-invalid={fieldInvalid("declaresNoMedicalRisk")}><input type="checkbox" bind:checked={form.declaresNoMedicalRisk} /> {L.medicalCondition}</label>
+            <label class="checkbox-label" class:field-invalid={fieldInvalid("declaresNoAlcoholOrDrugs")}><input type="checkbox" bind:checked={form.declaresNoAlcoholOrDrugs} /> {L.alcoholToday}</label>
             <label class="checkbox-label" class:field-invalid={fieldInvalid("acceptsSafetyRules")}><input type="checkbox" bind:checked={form.acceptsSafetyRules} /> {L.safetyRules}</label>
           </div>
         </div>

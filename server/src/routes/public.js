@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { Router } from "express";
 import { Attraction } from "../models/Attraction.js";
+import { PARK_ATTRACTIONS, sortParkAttractions } from "../lib/parkAttractions.js";
 import { Waiver } from "../models/Waiver.js";
 import { WaiverDraft } from "../models/WaiverDraft.js";
 import { signWaiverToken, verifyWaiverToken } from "../lib/token.js";
@@ -52,7 +53,10 @@ export function publicRoutes({ jwtSecret }) {
 
   router.get("/attractions", async (_req, res) => {
     const startedAt = nowMs();
-    const items = await Attraction.find({ active: true }).sort({ createdAt: -1 }).lean();
+    const parkCodes = PARK_ATTRACTIONS.map((item) => item.code);
+    const items = sortParkAttractions(
+      await Attraction.find({ active: true, code: { $in: parkCodes } }).lean()
+    );
     perfLog("db_query", {
       operation: "attraction_list_active",
       durationMs: nowMs() - startedAt
@@ -170,6 +174,7 @@ export function publicRoutes({ jwtSecret }) {
   router.post("/waivers", async (req, res) => {
     const {
       attractionId,
+      attractionIds,
       participant,
       answers,
       acceptedText,
@@ -180,7 +185,7 @@ export function publicRoutes({ jwtSecret }) {
       locale
     } = req.body ?? {};
 
-    if (!attractionId || !participant || !answers || acceptedText !== true || !signatureName || !signatureImage) {
+    if ((!attractionId && (!Array.isArray(attractionIds) || !attractionIds.length)) || !participant || !answers || acceptedText !== true || !signatureName || !signatureImage) {
       return res.status(400).json({ error: "Datos incompletos." });
     }
     if (!String(signatureImage).startsWith("data:image/png;base64,")) {
@@ -238,13 +243,31 @@ export function publicRoutes({ jwtSecret }) {
       }
     }
 
-    const attractionQueryAt = nowMs();
-    const attraction = await Attraction.findOne({ _id: attractionId, active: true }).lean();
+    const requestedAttractionIds = (
+      Array.isArray(attractionIds) && attractionIds.length ? attractionIds : [attractionId]
+    )
+      .map((id) => String(id || "").trim())
+      .filter(Boolean);
+    if (!requestedAttractionIds.length) {
+      return res.status(400).json({ error: "Selecciona al menos una atracción." });
+    }
+
+    const attractionsQueryAt = nowMs();
+    const attractionsList = await Attraction.find({
+      _id: { $in: requestedAttractionIds },
+      active: true
+    }).lean();
     perfLog("db_query", {
-      operation: "attraction_find_one_active",
-      durationMs: nowMs() - attractionQueryAt
+      operation: "attractions_find_active_by_ids",
+      durationMs: nowMs() - attractionsQueryAt
     });
-    if (!attraction) return res.status(404).json({ error: "Atracción no encontrada." });
+    if (attractionsList.length !== requestedAttractionIds.length) {
+      return res.status(404).json({ error: "Atracción no encontrada." });
+    }
+    const attractionsById = new Map(attractionsList.map((a) => [String(a._id), a]));
+    const orderedAttractions = requestedAttractionIds.map((id) => attractionsById.get(id));
+    const attraction = orderedAttractions[0];
+    const attractionName = orderedAttractions.map((a) => a.name).join(", ");
 
     const signedAt = new Date();
     const waiverTextSource =
@@ -256,7 +279,9 @@ export function publicRoutes({ jwtSecret }) {
     const waiver = await Waiver.create({
       folio,
       attractionId: attraction._id,
-      attractionName: attraction.name,
+      attractionName,
+      attractionIds: orderedAttractions.map((a) => a._id),
+      attractionNames: orderedAttractions.map((a) => a.name),
       participant,
       isMinor,
       guardian: isMinor ? guardian : undefined,
@@ -295,7 +320,7 @@ export function publicRoutes({ jwtSecret }) {
           await sendWaiverQrEmail({
             to: participant.email,
             participantName: participant.fullName,
-            attractionName: attraction.name,
+            attractionName: waiver.attractionName,
             waiverId: waiver.folio,
             signedAt,
             qrUrl,

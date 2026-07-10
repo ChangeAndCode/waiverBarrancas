@@ -18,7 +18,7 @@ export function requiresPhysicianInfo(takesMedications, medications) {
 
 export function collectWaiverFieldErrors({
   form,
-  selectedAttractionId,
+  selectedAttractionIds,
   takesMedications,
   selectedNationality,
   selectedState,
@@ -28,7 +28,7 @@ export function collectWaiverFieldErrors({
 }) {
   const errors = {};
 
-  if (!selectedAttractionId) errors.attractionId = true;
+  if (!selectedAttractionIds?.length) errors.attractionId = true;
   if (!meaningfulText(form.fullName, 3)) errors.fullName = true;
   if (!form.birthDate) errors.birthDate = true;
   if (!form.gender) errors.gender = true;
@@ -56,6 +56,8 @@ export function collectWaiverFieldErrors({
   if (!meaningfulText(form.emergencyContactRelationship)) errors.emergencyContactRelationship = true;
   if (!meaningfulText(form.emergencyContactPhone, PHONE_MIN_LENGTH)) errors.emergencyContactPhone = true;
 
+  if (form.declaresNoMedicalRisk !== true) errors.declaresNoMedicalRisk = true;
+  if (form.declaresNoAlcoholOrDrugs !== true) errors.declaresNoAlcoholOrDrugs = true;
   if (form.acceptsSafetyRules !== true) errors.acceptsSafetyRules = true;
   if (form.acceptedText !== true) errors.acceptedText = true;
 

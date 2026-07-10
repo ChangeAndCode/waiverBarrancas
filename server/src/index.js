@@ -9,6 +9,7 @@ import bcrypt from "bcryptjs";
 import { Attraction } from "./models/Attraction.js";
 import { User } from "./models/User.js";
 import { defaultWaiverTextMx2026 } from "./lib/waiverText.js";
+import { ensureParkAttractions } from "./lib/parkAttractions.js";
 import { publicRoutes } from "./routes/public.js";
 import { authRoutes } from "./routes/auth.js";
 import { adminRoutes } from "./routes/admin.js";
@@ -117,17 +118,7 @@ app.use((error, _req, res, _next) => {
 });
 
 await mongoose.connect(mongoUri);
-
-const hasAttractions = await Attraction.countDocuments();
-if (!hasAttractions) {
-  await Attraction.create({
-    name: "Tirolesa Gigante - Barrancas del Cobre",
-    code: "TIROLESA-001",
-    description: "Atracción principal de aventura.",
-    waiverText: defaultWaiverTextMx2026,
-    active: true
-  });
-}
+await ensureParkAttractions(Attraction, defaultWaiverTextMx2026);
 
 const superAdmin = await User.findOne({ email: superAdminEmail });
 if (!superAdmin) {

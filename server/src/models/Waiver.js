@@ -4,6 +4,8 @@ const waiverSchema = new mongoose.Schema(
   {
     attractionId: { type: mongoose.Schema.Types.ObjectId, ref: "Attraction", required: true },
     attractionName: { type: String, required: true },
+    attractionIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "Attraction" }],
+    attractionNames: [{ type: String, trim: true }],
     folio: { type: String, trim: true, unique: true, sparse: true },
     participant: {
       fullName: { type: String, required: true, trim: true },
