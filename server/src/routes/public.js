@@ -8,6 +8,7 @@ import { signWaiverToken, verifyWaiverToken } from "../lib/token.js";
 import { renderWaiverTextForSignature } from "../lib/waiverText.js";
 import { WAIVER_TEXT_EN_HTML } from "../lib/waiverTextEn.js";
 import { generateWaiverFolio, waiverDisplayId } from "../lib/folio.js";
+import { getWaiverQrExpiresAt, isWaiverQrExpired } from "../lib/waiverValidity.js";
 import { canSendEmails, sendWaiverQrEmail } from "../lib/email.js";
 import { nowMs, perfLog } from "../lib/perf.js";
 import Stripe from "stripe";
@@ -352,6 +353,17 @@ export function publicRoutes({ jwtSecret }) {
 
       if (!waiver || waiver.status !== "signed") {
         return res.status(404).json({ valid: false, error: "Waiver inválido o revocado." });
+      }
+
+      if (isWaiverQrExpired(waiver)) {
+        return res.json({
+          valid: false,
+          reason: "qr_expired",
+          signedAt: waiver.createdAt,
+          expiresAt: getWaiverQrExpiresAt(waiver.createdAt),
+          attractionName: waiver.attractionName,
+          fullName: waiver.participant.fullName
+        });
       }
 
       if (waiver.qrConsumedAt) {

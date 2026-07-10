@@ -1277,6 +1277,16 @@ async function handleCancelledPayment() {
         <p class="muted">
           Muéstralo al personal en la atracción. Abrir este enlace o escanearlo tú mismo aquí no lo marca como usado.
         </p>
+      {:else if checkData?.reason === "qr_expired"}
+        <p class="bad">Vigencia vencida</p>
+        <p class="muted">
+          Este waiver venció 72 horas después de firmarse. Es necesario firmar uno nuevo.
+        </p>
+        <p><b>Firmado el:</b> {new Date(checkData.signedAt).toLocaleString("es-MX")}</p>
+        <p><b>Venció el:</b> {new Date(checkData.expiresAt).toLocaleString("es-MX")}</p>
+        {#if checkData.fullName}
+          <p><b>Nombre:</b> {checkData.fullName}</p>
+        {/if}
       {:else if checkData?.reason === "qr_already_used"}
         <p class="bad">Ya fue usado en atracción</p>
         <p class="muted">
@@ -1326,6 +1336,13 @@ async function handleCancelledPayment() {
           <p><b>Nombre:</b> {staffScanResult.waiver.fullName}</p>
           <p><b>Atracción:</b> {staffScanResult.waiver.attractionName}</p>
           <p><b>Folio:</b> {staffScanResult.waiver.id}</p>
+        </div>
+      {:else if staffScanResult?.reason === "qr_expired"}
+        <div class="staff-scan-result">
+          <p class="bad">Vigencia vencida</p>
+          <p><b>Firmado el:</b> {new Date(staffScanResult.signedAt).toLocaleString("es-MX")}</p>
+          <p><b>Venció el:</b> {new Date(staffScanResult.expiresAt).toLocaleString("es-MX")}</p>
+          {#if staffScanResult.fullName}<p><b>Nombre:</b> {staffScanResult.fullName}</p>{/if}
         </div>
       {:else if staffScanResult?.reason === "qr_already_used"}
         <div class="staff-scan-result">

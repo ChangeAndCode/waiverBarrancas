@@ -4,6 +4,7 @@ import { Waiver } from "../models/Waiver.js";
 import { verifyWaiverToken } from "../lib/token.js";
 import { nowMs, perfLog } from "../lib/perf.js";
 import { waiverDisplayId } from "../lib/folio.js";
+import { getWaiverQrExpiresAt, isWaiverQrExpired } from "../lib/waiverValidity.js";
 
 export function reportRoutes({ jwtSecret }) {
   const router = Router();
@@ -22,6 +23,17 @@ export function reportRoutes({ jwtSecret }) {
       });
       if (!waiver || waiver.status !== "signed") {
         return res.status(404).json({ valid: false, error: "Waiver inválido o revocado." });
+      }
+
+      if (isWaiverQrExpired(waiver)) {
+        return res.json({
+          valid: false,
+          reason: "qr_expired",
+          signedAt: waiver.createdAt,
+          expiresAt: getWaiverQrExpiresAt(waiver.createdAt),
+          attractionName: waiver.attractionName,
+          fullName: waiver.participant.fullName
+        });
       }
 
       if (waiver.qrConsumedAt) {
