@@ -17,12 +17,12 @@ export const NATIONALITY_EN = {
 
 export const messages = {
   es: {
-    siteTitle: "Carta Responsiva - Parque Barrancas",
+    siteTitle: "Carta responsiva - Parque Barrancas",
     admin: "Admin",
     logout: "Salir",
   langEs: "Español",
   langEn: "English",
-    waiverTitle: "Registro de Waiver",
+    waiverTitle: "",
     sectionParticipant: "Datos del participante",
     attraction: "Atracción",
     fullName: "Nombre completo (como en tu INE)",
