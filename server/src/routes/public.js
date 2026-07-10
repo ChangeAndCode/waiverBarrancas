@@ -322,11 +322,13 @@ export function publicRoutes({ jwtSecret }) {
             to: participant.email,
             participantName: participant.fullName,
             attractionName: waiver.attractionName,
+            attractionNames: waiver.attractionNames,
             waiverId: waiver.folio,
             signedAt,
             qrUrl,
             qrImageUrl,
-            logoUrl
+            logoUrl,
+            locale
           });
           perfLog("async_email", {
             provider: "resend",
