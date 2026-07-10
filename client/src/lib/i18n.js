@@ -22,7 +22,7 @@ export const messages = {
     logout: "Salir",
   langEs: "Español",
   langEn: "English",
-    waiverTitle: "",
+    waiverTitle: "Registro",
     sectionParticipant: "Datos del participante",
     attraction: "Atracción",
     fullName: "Nombre completo (como en tu INE)",
