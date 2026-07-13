@@ -550,6 +550,17 @@ let form = {
     return showFieldErrors && fieldErrors[key];
   }
 
+  async function scrollToFirstInvalidField() {
+    await tick();
+    const target = document.querySelector(".waiver-form .field-invalid");
+    if (!target) return;
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    const focusable = target.querySelector(
+      "input:not([type=checkbox]):not([type=radio]), select, textarea"
+    );
+    if (focusable) focusable.focus({ preventScroll: true });
+  }
+
   function onLocationStateChange() {
     selectedCity = "";
     customCity = "";
@@ -665,6 +676,7 @@ let form = {
       waiverSubmitInFlight = false;
       loading = false;
       message = L.reviewFields;
+      await scrollToFirstInvalidField();
       return;
     }
     if (!signatureHasStroke || !signatureCanvas) {
@@ -672,6 +684,7 @@ let form = {
       loading = false;
       fieldErrors = { ...fieldErrors, signatureImage: true };
       message = L.participantSigRequired;
+      await scrollToFirstInvalidField();
       return;
     }
     if (!witnessSignatureHasStroke || !witnessSignatureCanvas) {
@@ -679,6 +692,7 @@ let form = {
       loading = false;
       fieldErrors = { ...fieldErrors, witnessSignatureImage: true };
       message = L.witnessSigRequired;
+      await scrollToFirstInvalidField();
       return;
     }
     if (isMinor && !hasRequiredGuardianFields()) {
@@ -1590,9 +1604,16 @@ async function handleCancelledPayment() {
       {/if}
     </section>
   {:else}
-    <section class="card waiver-form">
+    <section class="card waiver-form" style={`--field-error-hint: "${L.fieldRequired}"`}>
       <h2>{L.waiverTitle}</h2>
-      {#if message}<p class="bad">{message}</p>{/if}
+      {#if message}
+        <p
+          class={showFieldErrors && Object.keys(fieldErrors).length > 0 ? "field-error-banner" : "bad"}
+          role="alert"
+        >
+          {message}
+        </p>
+      {/if}
       <div class="form-section">
         <div class="form-section-header form-section-header-with-iso">
           <h3 class="form-section-title form-section-title-inline">{L.sectionParticipant}</h3>
@@ -2013,7 +2034,26 @@ async function handleCancelledPayment() {
     margin-top: 0;
     line-height: 1.3;
   }
+  .field-error-banner {
+    margin: 0;
+    padding: 12px 14px;
+    border-radius: 8px;
+    border: 2px solid #b42318;
+    background: #fef3f2;
+    color: #912018;
+    font-weight: 700;
+    line-height: 1.4;
+  }
+  .waiver-form .field-group.field-invalid,
+  .waiver-form .signature-block.field-invalid {
+    padding: 10px;
+    border-radius: 8px;
+    background: #fef3f2;
+    border: 2px solid #fca5a5;
+    box-shadow: inset 3px 0 0 #b42318;
+  }
   .waiver-form .field-group.field-invalid .field-label,
+  .waiver-form .field-group.field-invalid .signature-label b,
   .waiver-form .checkbox-label.field-invalid {
     color: #b42318;
   }
@@ -2021,7 +2061,33 @@ async function handleCancelledPayment() {
   .waiver-form .field-group.field-invalid select,
   .waiver-form .field-group.field-invalid .signature-pad {
     border-color: #b42318;
-    box-shadow: 0 0 0 1px rgba(180, 35, 24, 0.15);
+    border-width: 2px;
+    box-shadow: 0 0 0 3px rgba(180, 35, 24, 0.12);
+    background: #fff;
+  }
+  .waiver-form .field-group.field-invalid .radio-row,
+  .waiver-form .field-group.field-invalid .park-attractions-group {
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 2px dashed #b42318;
+    background: #fff;
+  }
+  .waiver-form .checkbox-label.field-invalid {
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 2px solid #b42318;
+    background: #fef3f2;
+    box-shadow: inset 3px 0 0 #b42318;
+  }
+  .waiver-form .field-group.field-invalid::after,
+  .waiver-form .checkbox-label.field-invalid::after {
+    content: var(--field-error-hint);
+    display: block;
+    margin-top: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #b42318;
+    line-height: 1.3;
   }
   .form-grid-2 {
     display: grid;
