@@ -18,6 +18,12 @@
   import { WAIVER_TEXT_EN_HTML } from "./lib/waiverTextEn.js";
 
   const API_BASE = "/api";
+  const ATTRACTION_SCHEDULE_BY_CODE = {
+    ZIPRIDER: "9:00 a 15:30 (Salidas en el momento)",
+    VIA_FERRATA: "9:15, 11:45 y 14:15",
+    CIRCUITO_TIROLESA: "9:15, 10:30, 11:30, 12:30 y 13:30",
+    BOSQUE_AEREO: "9:15, 12:45 y 14:15"
+  };
   const savedLocale = localStorage.getItem("waiverLocale");
   let locale = savedLocale === "en" ? "en" : "es";
   let path = window.location.pathname;
@@ -1630,13 +1636,18 @@ async function handleCancelledPayment() {
             <p class="field-label">{L.attraction}</p>
             <div class="checkbox-group park-attractions-group">
               {#each attractions as attraction (attraction._id)}
-                <label class="checkbox-label">
+                <label class="checkbox-label park-attraction-option">
                   <input
                     type="checkbox"
                     checked={selectedParkAttractions[attraction._id]}
                     on:change={(e) => toggleParkAttraction(attraction._id, e.target.checked)}
                   />
-                  {attraction.name}
+                  <span class="park-attraction-text">
+                    <span class="park-attraction-name">{attraction.name}</span>
+                    {#if ATTRACTION_SCHEDULE_BY_CODE[attraction.code]}
+                      <span class="park-attraction-hours">{ATTRACTION_SCHEDULE_BY_CODE[attraction.code]}</span>
+                    {/if}
+                  </span>
                 </label>
               {/each}
             </div>
@@ -2113,6 +2124,29 @@ async function handleCancelledPayment() {
     font-weight: 500;
     color: #1f4a3b;
     cursor: pointer;
+  }
+  .waiver-form .park-attraction-option {
+    align-items: flex-start;
+  }
+  .waiver-form .park-attraction-text {
+    display: flex;
+    flex: 1;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 4px 16px;
+    min-width: 0;
+  }
+  .waiver-form .park-attraction-name {
+    font-weight: 600;
+  }
+  .waiver-form .park-attraction-hours {
+    flex: 1 1 12rem;
+    text-align: right;
+    font-size: 13px;
+    font-weight: 500;
+    color: #4a5c52;
+    line-height: 1.35;
   }
   .waiver-form input[type="checkbox"],
   .waiver-form input[type="radio"] {
