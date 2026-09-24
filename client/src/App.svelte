@@ -65,6 +65,7 @@
   let adminUsers = [];
   let report = { summary: null, byAttraction: [], waivers: [] };
   let adminReport = { items: [], total: 0, page: 1, pageSize: 25, summary: null };
+  let adminHistory = null;
   let adminReportFilters = { attractionId: "", from: "", to: "", status: "", q: "" };
   let adminAttractionEditId = "";
   let editWaiverText = "";
@@ -1117,6 +1118,17 @@ async function handleCancelledPayment() {
     }
   }
 
+  async function loadAdminHistory(databaseId) {
+    adminHistory = { loading: true, data: null };
+    try {
+      const data = await api(`/admin/waivers/${databaseId}/history`);
+      adminHistory = { loading: false, data };
+    } catch (e) {
+      message = e.message;
+      adminHistory = { loading: false, data: null };
+    }
+  }
+
   function applyAdminReportFilters() {
     adminReport = { ...adminReport, page: 1 };
     loadAdminReport();
@@ -1599,6 +1611,7 @@ async function handleCancelledPayment() {
                   <th>Estado</th>
                   <th>QR validado (staff)</th>
                   <th>Fecha registro</th>
+                  <th>Historial</th>
                 </tr>
               </thead>
               <tbody>
@@ -1613,11 +1626,33 @@ async function handleCancelledPayment() {
                     <td>{row.status}</td>
                     <td>{row.qrConsumedAt ? new Date(row.qrConsumedAt).toLocaleString("es-MX") : "—"}</td>
                     <td>{new Date(row.createdAt).toLocaleString()}</td>
+                    <td><button type="button" on:click={() => loadAdminHistory(row.databaseId)} disabled={loading}>Ver historial</button></td>
                   </tr>
                 {/each}
               </tbody>
             </table>
           </div>
+          {#if adminHistory?.loading}
+            <p>Cargando historial...</p>
+          {:else if adminHistory?.data}
+            <div class="item">
+              <div class="inline-actions">
+                <h3>Historial de {adminHistory.data.folio}</h3>
+                <button type="button" class="secondary" on:click={() => (adminHistory = null)}>Cerrar</button>
+              </div>
+              {#if adminHistory.data.events.length === 0}
+                <p>No hay eventos registrados para este waiver.</p>
+              {:else}
+                {#each adminHistory.data.events as event}
+                  <p>
+                    <b>{event.action}</b> — {new Date(event.createdAt).toLocaleString("es-MX")}
+                    {#if event.userId} — {event.userId.name} ({event.userId.role}){/if}
+                    {#if event.comment}<br />Comentario: {event.comment}{/if}
+                  </p>
+                {/each}
+              {/if}
+            </div>
+          {/if}
           {#if adminReport.items.length === 0 && !loading}
             <p>No hay registros con estos filtros.</p>
           {/if}

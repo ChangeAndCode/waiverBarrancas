@@ -45,6 +45,7 @@ function csvCell(v) {
 
 function mapWaiverRow(w) {
   return {
+    databaseId: w._id,
     id: waiverDisplayId(w),
     attractionId: w.attractionId,
     attractionName: w.attractionName,
