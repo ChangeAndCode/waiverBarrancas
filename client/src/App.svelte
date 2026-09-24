@@ -2533,6 +2533,34 @@ async function handleCancelledPayment() {
     color: #1f4a3b;
     font-weight: 700;
   }
+  .report-table th:nth-last-child(2),
+  .report-table td:nth-last-child(2) {
+    position: sticky;
+    right: 92px;
+    z-index: 2;
+    width: 82px;
+    min-width: 82px;
+    background: #fff;
+    box-shadow: -5px 0 8px rgba(31, 74, 59, 0.08);
+  }
+  .report-table th:nth-last-child(2) {
+    background: #f0e6d4;
+    z-index: 4;
+  }
+  .report-table th:last-child,
+  .report-table td:last-child {
+    position: sticky;
+    right: 0;
+    z-index: 3;
+    width: 92px;
+    min-width: 92px;
+    background: #fff;
+    box-shadow: -5px 0 8px rgba(31, 74, 59, 0.12);
+  }
+  .report-table th:last-child {
+    background: #f0e6d4;
+    z-index: 5;
+  }
   .pager {
     width: 100%;
     display: grid;
