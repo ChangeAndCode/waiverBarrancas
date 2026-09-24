@@ -1224,10 +1224,12 @@ async function handleCancelledPayment() {
     if (path.startsWith("/check/")) return loadCheck();
     if (path === "/staff") {
       if (!authToken) return goTo("/admin?next=/staff");
+      if (!authUser || !["staff", "admin"].includes(authUser.role)) return goTo("/");
       return loadReport();
     }
     if (path === "/admin") {
-      if (!authToken || authUser?.role !== "admin") return;
+      if (!authToken) return;
+      if (authUser?.role !== "admin") return goTo("/staff");
       return loadAdminData();
     }
     if (path === "/success") {
@@ -1253,10 +1255,10 @@ async function handleCancelledPayment() {
       <h1>{isPublicWaiverUi ? L.siteTitle : "Waiver Digital - Parque Temático"}</h1>
     </div>
     <nav>
-      {#if path === "/admin"}
+      {#if path === "/admin" && authUser?.role === "admin"}
         <span class="admin-pill">Modo Admin</span>
-      {:else}
-        <button on:click={() => goTo("/admin")}>{isPublicWaiverUi ? L.admin : "Admin"}</button>
+      {:else if !authToken || authUser?.role === "admin"}
+        <button on:click={() => goTo("/admin")}>{isPublicWaiverUi ? L.admin : "Iniciar Sesión"}</button>
       {/if}
       {#if authToken}
         <button on:click={logout}>{isPublicWaiverUi ? L.logout : "Salir"}</button>
