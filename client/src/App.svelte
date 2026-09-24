@@ -50,6 +50,8 @@
 
   let staffScanPaste = "";
   let staffScanResult = null;
+  let staffReviewComment = "";
+  let staffReviewBusy = false;
   let staffScanBusy = false;
   let staffScanError = "";
   let staffScanRunning = false;
@@ -929,12 +931,40 @@ async function handleCancelledPayment() {
     staffScanError = "";
     try {
       staffScanResult = await api(`/reports/validate/${encodeURIComponent(token)}`);
+      staffReviewComment = "";
       await loadReport();
     } catch (e) {
       staffScanResult = null;
       staffScanError = e.message;
     } finally {
       staffScanBusy = false;
+    }
+  }
+
+  async function reviewStaffWaiver(decision) {
+    const databaseId = staffScanResult?.waiver?.databaseId;
+    const comment = staffReviewComment.trim();
+    if (!databaseId) return;
+    if (decision === "rejected" && !comment) {
+      staffScanError = "Escribe un comentario para rechazar el waiver.";
+      return;
+    }
+    staffReviewBusy = true;
+    staffScanError = "";
+    try {
+      const result = await api(`/reports/waivers/${databaseId}/review`, "POST", {
+        decision,
+        comment
+      });
+      staffScanResult = {
+        ...staffScanResult,
+        waiver: { ...staffScanResult.waiver, review: result.waiver }
+      };
+      await loadReport();
+    } catch (e) {
+      staffScanError = e.message;
+    } finally {
+      staffReviewBusy = false;
     }
   }
 
@@ -1358,6 +1388,19 @@ async function handleCancelledPayment() {
           <p><b>Nombre:</b> {staffScanResult.waiver.fullName}</p>
           <p><b>Atracción:</b> {staffScanResult.waiver.attractionName}</p>
           <p><b>Folio:</b> {staffScanResult.waiver.id}</p>
+          {#if staffScanResult.waiver.review?.decision}
+            <p><b>Decisión:</b> {staffScanResult.waiver.review.decision === "approved" ? "Aprobado" : "Rechazado"}</p>
+            {#if staffScanResult.waiver.review.comment}
+              <p><b>Comentario:</b> {staffScanResult.waiver.review.comment}</p>
+            {/if}
+          {:else}
+            <label class="field-label" for="staffReviewComment">Comentario de revisión</label>
+            <textarea id="staffReviewComment" bind:value={staffReviewComment} rows="3" maxlength="1000" placeholder="Comentario opcional para aprobar u obligatorio para rechazar"></textarea>
+            <div class="inline-actions">
+              <button type="button" on:click={() => reviewStaffWaiver("approved")} disabled={staffReviewBusy}>Aprobar waiver</button>
+              <button type="button" class="secondary" on:click={() => reviewStaffWaiver("rejected")} disabled={staffReviewBusy}>Rechazar waiver</button>
+            </div>
+          {/if}
         </div>
       {:else if staffScanResult?.reason === "qr_expired"}
         <div class="staff-scan-result">
