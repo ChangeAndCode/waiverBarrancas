@@ -6,6 +6,7 @@ import { User } from "../models/User.js";
 import { requireAuth, requireRoles } from "../lib/auth.js";
 import { nowMs, perfLog } from "../lib/perf.js";
 import { waiverDisplayId } from "../lib/folio.js";
+import { WaiverAuditEvent } from "../models/WaiverAuditEvent.js";
 
 const MAX_CSV_ROWS = 50000;
 const waiverSelectLean =
@@ -137,7 +138,29 @@ export function adminRoutes({ jwtSecret }) {
       { new: true }
     ).lean();
     if (!updated) return res.status(404).json({ error: "Waiver no encontrado." });
+    await WaiverAuditEvent.create({
+      waiverId: updated._id,
+      userId: req.user._id,
+      action: "revoked",
+      comment: String(req.body?.comment || "").trim()
+    });
     res.json(updated);
+  });
+
+  router.get("/waivers/:id/history", async (req, res) => {
+    const waiver = await Waiver.findById(req.params.id).select("_id folio").lean();
+    if (!waiver) return res.status(404).json({ error: "Waiver no encontrado." });
+
+    const events = await WaiverAuditEvent.find({ waiverId: waiver._id })
+      .populate("userId", "name email role")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    res.json({
+      waiverId: waiver._id,
+      folio: waiver.folio,
+      events
+    });
   });
 
   router.get("/reports/waivers", async (req, res) => {

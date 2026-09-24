@@ -5,6 +5,7 @@ import { verifyWaiverToken } from "../lib/token.js";
 import { nowMs, perfLog } from "../lib/perf.js";
 import { waiverDisplayId } from "../lib/folio.js";
 import { getWaiverQrExpiresAt, isWaiverQrExpired } from "../lib/waiverValidity.js";
+import { WaiverAuditEvent } from "../models/WaiverAuditEvent.js";
 
 export function reportRoutes({ jwtSecret }) {
   const router = Router();
@@ -36,6 +37,12 @@ export function reportRoutes({ jwtSecret }) {
       reviewedAt: new Date()
     };
     await waiver.save();
+    await WaiverAuditEvent.create({
+      waiverId: waiver._id,
+      userId: req.user._id,
+      action: decision,
+      comment
+    });
 
     return res.json({
       ok: true,
@@ -114,6 +121,13 @@ export function reportRoutes({ jwtSecret }) {
           fullName: again.participant.fullName
         });
       }
+
+      await WaiverAuditEvent.create({
+        waiverId: consumed._id,
+        userId: req.user._id,
+        action: "qr_validated",
+        metadata: { source: "staff_validation" }
+      });
 
       return res.json({
         valid: true,
