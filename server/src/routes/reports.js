@@ -25,7 +25,7 @@ export function reportRoutes({ jwtSecret }) {
       return res.status(400).json({ error: "El comentario no puede exceder 1000 caracteres." });
     }
 
-    const waiver = await Waiver.findOne({ _id: req.params.id, status: "pending" });
+    const waiver = await Waiver.findOne({ _id: req.params.id, status: { $in: ["pending", "signed"] } });
     if (!waiver) {
       return res.status(404).json({ error: "Waiver no encontrado o revocado." });
     }
@@ -96,7 +96,7 @@ export function reportRoutes({ jwtSecret }) {
 
       const consumeAt = nowMs();
       const consumed = await Waiver.findOneAndUpdate(
-        { _id: waiverId, status: { $in: ["pending", "approved"] }, qrConsumedAt: null },
+        { _id: waiverId, status: { $in: ["pending", "signed", "approved"] }, qrConsumedAt: null },
         { $set: { qrConsumedAt: new Date() } },
         { new: true }
       ).lean();
@@ -165,7 +165,7 @@ export function reportRoutes({ jwtSecret }) {
       durationMs: nowMs() - waiversAt
     });
     const total = waivers.length;
-    const pending = waivers.filter((w) => w.status === "pending").length;
+    const pending = waivers.filter((w) => ["pending", "signed"].includes(w.status)).length;
     const approved = waivers.filter((w) => w.status === "approved").length;
     const rejected = waivers.filter((w) => w.status === "rejected").length;
     const revoked = waivers.filter((w) => w.status === "revoked").length;
@@ -188,7 +188,7 @@ export function reportRoutes({ jwtSecret }) {
         attractionName: w.attractionName,
         fullName: w.participant.fullName,
         email: w.participant.email,
-        status: w.status,
+        status: w.status === "signed" ? "pending" : w.status,
         createdAt: w.createdAt
       }))
     });

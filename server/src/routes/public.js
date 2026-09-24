@@ -379,11 +379,11 @@ export function publicRoutes({ jwtSecret }) {
         });
       }
 
-      if (waiver.status === "pending") {
+      if (["pending", "signed"].includes(waiver.status)) {
         return res.json({
           valid: false,
           reason: "waiver_pending",
-          status: waiver.status,
+          status: "pending",
           attractionName: waiver.attractionName,
           fullName: waiver.participant.fullName,
           signedAt: waiver.createdAt

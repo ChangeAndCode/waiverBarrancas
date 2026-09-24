@@ -2534,8 +2534,30 @@ async function handleCancelledPayment() {
     font-weight: 700;
   }
   .pager {
+    width: 100%;
+    display: grid;
+    grid-template-columns: auto minmax(150px, 1fr) auto auto auto;
     align-items: center;
-    margin-top: 8px;
+    gap: 12px;
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid #e3d7c4;
+  }
+  .pager > button:first-child {
+    grid-column: 1;
+  }
+  .pager-info {
+    text-align: center;
+  }
+  .pager > button:nth-of-type(2) {
+    grid-column: 3;
+  }
+  .pager > .inline-label {
+    grid-column: 4;
+  }
+  .pager > select {
+    grid-column: 5;
+    min-width: 78px;
   }
   .pager-info {
     font-size: 13px;
@@ -2543,6 +2565,30 @@ async function handleCancelledPayment() {
   }
   .inline-label {
     margin: 0;
+  }
+  @media (max-width: 700px) {
+    .pager {
+      grid-template-columns: 1fr 1fr;
+    }
+    .pager > button:first-child,
+    .pager > button:nth-of-type(2),
+    .pager-info,
+    .pager > .inline-label,
+    .pager > select {
+      grid-column: auto;
+    }
+    .pager-info {
+      grid-column: 1 / -1;
+      grid-row: 2;
+    }
+    .pager > .inline-label {
+      grid-column: 1;
+      grid-row: 3;
+    }
+    .pager > select {
+      grid-column: 2;
+      grid-row: 3;
+    }
   }
   .tabs {
     display: flex;

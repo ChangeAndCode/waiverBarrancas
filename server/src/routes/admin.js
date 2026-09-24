@@ -20,7 +20,9 @@ function waiverAdminReportFilter(req) {
   const query = {};
   if (req.query.attractionId) query.attractionId = req.query.attractionId;
   const st = String(req.query.status || "").trim();
-  if (["pending", "approved", "rejected", "revoked"].includes(st)) query.status = st;
+  if (["pending", "approved", "rejected", "revoked"].includes(st)) {
+    query.status = st === "pending" ? { $in: ["pending", "signed"] } : st;
+  }
   if (req.query.from || req.query.to) {
     query.createdAt = {};
     if (req.query.from) query.createdAt.$gte = new Date(req.query.from);
@@ -72,7 +74,7 @@ function mapWaiverRow(w) {
     hasMedicalCondition: w.answers?.hasMedicalCondition,
     consumedAlcoholOrDrugs: w.answers?.consumedAlcoholOrDrugs,
     acceptsSafetyRules: w.answers?.acceptsSafetyRules,
-    status: w.status,
+    status: w.status === "signed" ? "pending" : w.status,
     qrConsumedAt: w.qrConsumedAt || null,
     createdAt: w.createdAt
   };
@@ -219,7 +221,7 @@ export function adminRoutes({ jwtSecret }) {
     } else {
       const statusCountsAt = nowMs();
       [pendingCount, approvedCount, rejectedCount, revokedCount] = await Promise.all([
-        Waiver.countDocuments({ ...filter, status: "pending" }),
+        Waiver.countDocuments({ ...filter, status: { $in: ["pending", "signed"] } }),
         Waiver.countDocuments({ ...filter, status: "approved" }),
         Waiver.countDocuments({ ...filter, status: "rejected" }),
         Waiver.countDocuments({ ...filter, status: "revoked" })
