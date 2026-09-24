@@ -1589,7 +1589,9 @@ async function handleCancelledPayment() {
             <label class="field-label" for="repSt">Estado</label>
             <select id="repSt" bind:value={adminReportFilters.status}>
               <option value="">Todos</option>
-              <option value="signed">Firmado</option>
+              <option value="pending">Pendiente</option>
+              <option value="approved">Aprobado</option>
+              <option value="rejected">Rechazado</option>
               <option value="revoked">Revocado</option>
             </select>
             <label class="field-label" for="repQ">Buscar</label>

@@ -16,7 +16,7 @@ const waiverAuditEventSchema = new mongoose.Schema(
     },
     action: {
       type: String,
-      enum: ["qr_validated", "approved", "rejected", "revoked"],
+      enum: ["qr_validated", "approved", "rejected", "revoked", "status_changed"],
       required: true,
       index: true
     },

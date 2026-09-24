@@ -165,7 +165,9 @@ export function reportRoutes({ jwtSecret }) {
       durationMs: nowMs() - waiversAt
     });
     const total = waivers.length;
-    const signed = waivers.filter((w) => w.status === "signed").length;
+    const pending = waivers.filter((w) => w.status === "pending").length;
+    const approved = waivers.filter((w) => w.status === "approved").length;
+    const rejected = waivers.filter((w) => w.status === "rejected").length;
     const revoked = waivers.filter((w) => w.status === "revoked").length;
 
     const byAttraction = Object.values(
@@ -179,7 +181,7 @@ export function reportRoutes({ jwtSecret }) {
     );
 
     res.json({
-      summary: { total, signed, revoked },
+      summary: { total, pending, approved, rejected, revoked },
       byAttraction,
       waivers: waivers.map((w) => ({
         id: waiverDisplayId(w),
