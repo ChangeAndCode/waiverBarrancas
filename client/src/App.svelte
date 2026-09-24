@@ -66,6 +66,9 @@
   let report = { summary: null, byAttraction: [], waivers: [] };
   let adminReport = { items: [], total: 0, page: 1, pageSize: 25, summary: null };
   let adminHistory = null;
+  let adminStatusDrafts = {};
+  let adminStatusComments = {};
+  let adminStatusEditRow = null;
   let adminReportFilters = { attractionId: "", from: "", to: "", status: "", q: "" };
   let adminAttractionEditId = "";
   let editWaiverText = "";
@@ -1287,6 +1290,28 @@ async function handleCancelledPayment() {
     await loadPublicAttractions();
   }
 
+  async function updateAdminWaiverStatus(row) {
+    const databaseId = row.databaseId;
+    const status = adminStatusDrafts[databaseId] || row.status;
+    const comment = String(adminStatusComments[databaseId] || "").trim();
+    try {
+      const data = await api(`/admin/waivers/${databaseId}/status`, "PATCH", { status, comment });
+      message = `Estado de ${data.waiver.id} actualizado a ${data.waiver.status}.`;
+      console.log(`Estado actualizado para el folio ${data.waiver.id}`);
+      adminStatusEditRow = null;
+      adminStatusComments = { ...adminStatusComments, [databaseId]: "" };
+      await loadAdminReport();
+    } catch (e) {
+      message = e.message;
+    }
+  }
+
+  function openAdminStatusEditor(row) {
+    adminStatusEditRow = row;
+    adminStatusDrafts = { ...adminStatusDrafts, [row.databaseId]: row.status === "signed" ? "pending" : row.status };
+    adminStatusComments = { ...adminStatusComments, [row.databaseId]: "" };
+  }
+
   bootstrap();
 </script>
 
@@ -1440,7 +1465,7 @@ async function handleCancelledPayment() {
 
       <h3>Últimos registros</h3>
       {#if report.summary}
-        <p><b>Total:</b> {report.summary.total} | <b>Firmados:</b> {report.summary.signed} | <b>Revocados:</b> {report.summary.revoked}</p>
+        <p><b>Total:</b> {report.summary.total} | <b>Pendientes:</b> {report.summary.pending} | <b>Aprobados:</b> {report.summary.approved} | <b>Rechazados:</b> {report.summary.rejected} | <b>Revocados:</b> {report.summary.revoked}</p>
       {/if}
       {#each report.waivers as item}
         <div class="item">
@@ -1564,7 +1589,7 @@ async function handleCancelledPayment() {
         {#if adminTab === "report"}
           <h3>Reporte básico</h3>
           {#if report.summary}
-            <p><b>Total:</b> {report.summary.total} | <b>Firmados:</b> {report.summary.signed} | <b>Revocados:</b> {report.summary.revoked}</p>
+            <p><b>Total:</b> {report.summary.total} | <b>Pendientes:</b> {report.summary.pending} | <b>Aprobados:</b> {report.summary.approved} | <b>Rechazados:</b> {report.summary.rejected} | <b>Revocados:</b> {report.summary.revoked}</p>
           {:else}
             <p>No hay datos de reporte.</p>
           {/if}
@@ -1604,7 +1629,9 @@ async function handleCancelledPayment() {
           {#if adminReport.summary}
             <p>
               <b>Coincidencias:</b> {adminReport.summary.total} |
-              <b>Firmados:</b> {adminReport.summary.signed} |
+              <b>Pendientes:</b> {adminReport.summary.pending} |
+              <b>Aprobados:</b> {adminReport.summary.approved} |
+              <b>Rechazados:</b> {adminReport.summary.rejected} |
               <b>Revocados:</b> {adminReport.summary.revoked}
             </p>
           {/if}
@@ -1622,6 +1649,7 @@ async function handleCancelledPayment() {
                   <th>QR validado (staff)</th>
                   <th>Fecha registro</th>
                   <th>Historial</th>
+                  <th>Actualizar estado</th>
                 </tr>
               </thead>
               <tbody>
@@ -1636,31 +1664,111 @@ async function handleCancelledPayment() {
                     <td>{row.status}</td>
                     <td>{row.qrConsumedAt ? new Date(row.qrConsumedAt).toLocaleString("es-MX") : "—"}</td>
                     <td>{new Date(row.createdAt).toLocaleString()}</td>
-                    <td><button type="button" on:click={() => loadAdminHistory(row.databaseId)} disabled={loading}>Ver historial</button></td>
+                    <td>
+                      <button
+                        type="button"
+                        class="icon-button history-icon-button"
+                        title="Ver historial"
+                        aria-label={`Ver historial de ${row.id}`}
+                        on:click={() => loadAdminHistory(row.databaseId)}
+                        disabled={loading}
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                          <circle cx="11" cy="11" r="6.5"></circle>
+                          <path d="m16 16 5 5"></path>
+                        </svg>
+                      </button>
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        class="icon-button status-edit-button"
+                        title="Actualizar estado"
+                        aria-label={`Actualizar estado de ${row.id}`}
+                        on:click={() => openAdminStatusEditor(row)}
+                        disabled={loading}
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                          <path d="m4 20 4.2-1 10.3-10.3a2.1 2.1 0 0 0-3-3L5.2 16 4 20Z"></path>
+                          <path d="m13.8 7.2 3 3"></path>
+                        </svg>
+                      </button>
+                    </td>
                   </tr>
                 {/each}
               </tbody>
             </table>
           </div>
-          {#if adminHistory?.loading}
-            <p>Cargando historial...</p>
-          {:else if adminHistory?.data}
-            <div class="item">
-              <div class="inline-actions">
-                <h3>Historial de {adminHistory.data.folio}</h3>
-                <button type="button" class="secondary" on:click={() => (adminHistory = null)}>Cerrar</button>
+          {#if adminStatusEditRow}
+            <div class="status-modal-backdrop">
+              <div class="status-modal" role="dialog" aria-modal="true" aria-labelledby="status-modal-title">
+                <div class="history-modal-header">
+                  <h3 id="status-modal-title">Actualizar estado de {adminStatusEditRow.id}</h3>
+                  <button type="button" class="secondary history-modal-close" aria-label="Cerrar actualización" on:click={() => (adminStatusEditRow = null)}>×</button>
+                </div>
+                <label class="field-label" for="adminStatusSelect">Estado</label>
+                <select
+                  id="adminStatusSelect"
+                  value={adminStatusDrafts[adminStatusEditRow.databaseId] || adminStatusEditRow.status}
+                  on:change={(event) => {
+                    adminStatusDrafts = { ...adminStatusDrafts, [adminStatusEditRow.databaseId]: event.currentTarget.value };
+                  }}
+                >
+                  <option value="pending">Pendiente</option>
+                  <option value="approved">Aprobado</option>
+                  <option value="rejected">Rechazado</option>
+                  <option value="revoked">Revocado</option>
+                </select>
+                <label class="field-label" for="adminStatusComment">Comentario</label>
+                <textarea
+                  id="adminStatusComment"
+                  rows="4"
+                  maxlength="1000"
+                  placeholder="Comentario"
+                  value={adminStatusComments[adminStatusEditRow.databaseId] || ""}
+                  on:input={(event) => {
+                    adminStatusComments = { ...adminStatusComments, [adminStatusEditRow.databaseId]: event.currentTarget.value };
+                  }}
+                ></textarea>
+                <div class="modal-actions">
+                  <button type="button" on:click={() => updateAdminWaiverStatus(adminStatusEditRow)} disabled={loading}>Actualizar estado</button>
+                  <button type="button" class="secondary" on:click={() => (adminStatusEditRow = null)}>Cancelar</button>
+                </div>
               </div>
-              {#if adminHistory.data.events.length === 0}
-                <p>No hay eventos registrados para este waiver.</p>
-              {:else}
-                {#each adminHistory.data.events as event}
-                  <p>
-                    <b>{event.action}</b> — {new Date(event.createdAt).toLocaleString("es-MX")}
-                    {#if event.userId} — {event.userId.name} ({event.userId.role}){/if}
-                    {#if event.comment}<br />Comentario: {event.comment}{/if}
-                  </p>
-                {/each}
-              {/if}
+            </div>
+          {/if}
+          {#if adminHistory?.loading}
+            <div class="history-modal-backdrop">
+              <div class="history-modal" role="dialog" aria-modal="true" aria-label="Cargando historial">
+                <p>Cargando historial...</p>
+              </div>
+            </div>
+          {:else if adminHistory?.data}
+            <div class="history-modal-backdrop">
+              <div class="history-modal" role="dialog" aria-modal="true" aria-labelledby="history-modal-title">
+                <div class="history-modal-header">
+                  <h3 id="history-modal-title">Historial de {adminHistory.data.folio}</h3>
+                  <button type="button" class="secondary history-modal-close" aria-label="Cerrar historial" on:click={() => (adminHistory = null)}>×</button>
+                </div>
+                {#if adminHistory.data.events.length === 0}
+                  <p>No hay eventos registrados para este waiver.</p>
+                {:else}
+                  <div class="history-modal-events">
+                    {#each adminHistory.data.events as event}
+                      <div class="history-event">
+                        <p>
+                          <b>{event.action}</b> — {new Date(event.createdAt).toLocaleString("es-MX")}
+                          {#if event.userId} — {event.userId.name} ({event.userId.role}){/if}
+                        </p>
+                        {#if event.comment}<p class="muted">Comentario: {event.comment}</p>{/if}
+                      </div>
+                    {/each}
+                  </div>
+                {/if}
+                <div class="history-modal-footer">
+                  <button type="button" class="secondary" on:click={() => (adminHistory = null)}>Cerrar</button>
+                </div>
+              </div>
             </div>
           {/if}
           {#if adminReport.items.length === 0 && !loading}
@@ -2486,6 +2594,120 @@ async function handleCancelledPayment() {
   .modal-help {
     margin: 0;
     color: #2a4034;
+  }
+
+  .history-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(18, 30, 23, 0.58);
+  }
+  .history-modal {
+    width: min(680px, 100%);
+    max-height: min(720px, 90vh);
+    overflow: auto;
+    padding: 22px;
+    border: 1px solid #e3d7c4;
+    border-radius: 14px;
+    background: #fffaf3;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.3);
+  }
+  .history-modal-header,
+  .history-modal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .history-modal-header h3 {
+    margin: 0;
+  }
+  .history-modal-close {
+    min-width: 38px;
+    padding: 6px 11px;
+    font-size: 22px;
+    line-height: 1;
+  }
+  .icon-button {
+    width: 42px;
+    min-width: 42px;
+    height: 42px;
+    padding: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+  }
+  .icon-button svg {
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.2;
+    stroke-linecap: round;
+  }
+  .history-icon-button {
+    background: #fff;
+    color: #000;
+    border: 1px solid #c9c9c9;
+  }
+  .history-icon-button:hover,
+  .history-icon-button:focus-visible {
+    background: #1f4a3b;
+    color: #fff;
+    border-color: #1f4a3b;
+  }
+  .status-edit-button {
+    background: #fff;
+    color: #000;
+    border: 1px solid #c9c9c9;
+  }
+  .status-edit-button:hover,
+  .status-edit-button:focus-visible {
+    background: #1976d2;
+    color: #fff;
+    border-color: #125da5;
+  }
+  .status-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(18, 30, 23, 0.58);
+  }
+  .status-modal {
+    width: min(520px, 100%);
+    padding: 22px;
+    border: 1px solid #e3d7c4;
+    border-radius: 14px;
+    background: #fffaf3;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.3);
+    display: grid;
+    gap: 10px;
+  }
+  .history-modal-events {
+    display: grid;
+    gap: 10px;
+    margin: 18px 0;
+  }
+  .history-event {
+    padding: 12px;
+    border: 1px solid #e3d7c4;
+    border-radius: 8px;
+    background: #f8f0e3;
+  }
+  .history-event p {
+    margin: 0;
+  }
+  .history-event p + p {
+    margin-top: 6px;
   }
   .ok { color: #1a7f45; font-weight: 700; }
   .bad { color: #b42318; font-weight: 700; }
