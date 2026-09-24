@@ -57,7 +57,11 @@ const waiverSchema = new mongoose.Schema(
       reviewedAt: { type: Date, default: null }
     },
     qrConsumedAt: { type: Date, default: null },
-    status: { type: String, enum: ["signed", "revoked"], default: "signed" }
+    status: {
+      type: String,
+      enum: ["pending", "approved", "rejected", "revoked"],
+      default: "pending"
+    }
   },
   { timestamps: true }
 );

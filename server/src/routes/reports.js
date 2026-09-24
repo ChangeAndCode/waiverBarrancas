@@ -25,7 +25,7 @@ export function reportRoutes({ jwtSecret }) {
       return res.status(400).json({ error: "El comentario no puede exceder 1000 caracteres." });
     }
 
-    const waiver = await Waiver.findOne({ _id: req.params.id, status: "signed" });
+    const waiver = await Waiver.findOne({ _id: req.params.id, status: "pending" });
     if (!waiver) {
       return res.status(404).json({ error: "Waiver no encontrado o revocado." });
     }
@@ -36,6 +36,7 @@ export function reportRoutes({ jwtSecret }) {
       reviewedBy: req.user._id,
       reviewedAt: new Date()
     };
+    waiver.status = decision;
     await waiver.save();
     await WaiverAuditEvent.create({
       waiverId: waiver._id,
@@ -48,6 +49,7 @@ export function reportRoutes({ jwtSecret }) {
       ok: true,
       waiver: {
         id: waiverDisplayId(waiver),
+        status: waiver.status,
         decision: waiver.review.decision,
         comment: waiver.review.comment,
         reviewedBy: waiver.review.reviewedBy,
@@ -67,7 +69,7 @@ export function reportRoutes({ jwtSecret }) {
         operation: "reports_validate_find_by_id",
         durationMs: nowMs() - firstLookupAt
       });
-      if (!waiver || waiver.status !== "signed") {
+      if (!waiver || ["revoked", "rejected"].includes(waiver.status)) {
         return res.status(404).json({ valid: false, error: "Waiver inválido o revocado." });
       }
 
@@ -94,7 +96,7 @@ export function reportRoutes({ jwtSecret }) {
 
       const consumeAt = nowMs();
       const consumed = await Waiver.findOneAndUpdate(
-        { _id: waiverId, status: "signed", qrConsumedAt: null },
+        { _id: waiverId, status: { $in: ["pending", "approved"] }, qrConsumedAt: null },
         { $set: { qrConsumedAt: new Date() } },
         { new: true }
       ).lean();
@@ -110,7 +112,7 @@ export function reportRoutes({ jwtSecret }) {
           operation: "reports_validate_find_by_id_retry",
           durationMs: nowMs() - secondLookupAt
         });
-        if (!again || again.status !== "signed") {
+        if (!again || ["revoked", "rejected"].includes(again.status)) {
           return res.status(404).json({ valid: false, error: "Waiver inválido o revocado." });
         }
         return res.json({

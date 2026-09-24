@@ -1361,6 +1361,14 @@ async function handleCancelledPayment() {
         {#if checkData.fullName}
           <p><b>Nombre:</b> {checkData.fullName}</p>
         {/if}
+      {:else if checkData?.reason === "waiver_pending"}
+        <p class="bad">Pendiente de revisión</p>
+        <p class="muted">El personal debe revisar y aprobar esta responsiva antes de permitir el acceso.</p>
+        {#if checkData.fullName}<p><b>Nombre:</b> {checkData.fullName}</p>{/if}
+      {:else if checkData?.reason === "waiver_rejected"}
+        <p class="bad">Waiver rechazado</p>
+        {#if checkData.comment}<p><b>Motivo:</b> {checkData.comment}</p>{/if}
+        {#if checkData.fullName}<p><b>Nombre:</b> {checkData.fullName}</p>{/if}
       {:else}
         <p class="bad">No disponible</p>
         <p>{message || "No se pudo mostrar el código."}</p>
