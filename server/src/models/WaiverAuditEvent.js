@@ -14,9 +14,24 @@ const waiverAuditEventSchema = new mongoose.Schema(
       default: null,
       index: true
     },
+    userRole: {
+      type: String,
+      enum: ["admin", "staff", null],
+      default: null,
+      index: true
+    },
     action: {
       type: String,
-      enum: ["qr_validated", "approved", "rejected", "revoked", "status_changed"],
+      enum: [
+        "waiver_created",
+        "qr_generated",
+        "qr_validated",
+        "comment_added",
+        "approved",
+        "rejected",
+        "revoked",
+        "status_changed"
+      ],
       required: true,
       index: true
     },
