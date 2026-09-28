@@ -42,6 +42,37 @@
   let authToken = localStorage.getItem("authToken") || "";
   let authUser = JSON.parse(localStorage.getItem("authUser") || "null");
 
+  const ROLE_PERMISSIONS = {
+    staff: [
+      "auth.login",
+      "waiver.scan",
+      "waiver.read.scanned",
+      "waiver.review",
+      "waiver.comment",
+      "waiver.schedule.assign",
+      "waiver.ticket.print"
+    ],
+    admin: [
+      "auth.login",
+      "waiver.scan",
+      "waiver.read.scanned",
+      "waiver.review",
+      "waiver.comment",
+      "waiver.schedule.assign",
+      "waiver.ticket.print",
+      "waiver.history.read",
+      "waiver.export",
+      "waiver.delete",
+      "users.manage",
+      "settings.manage",
+      "admin.panel"
+    ]
+  };
+
+  function hasPermission(permission) {
+    return Boolean(authUser?.role && ROLE_PERMISSIONS[authUser.role]?.includes(permission));
+  }
+
   let attractions = [];
   let selectedParkAttractions = {};
   let waiverResult = null;
@@ -1269,12 +1300,12 @@ async function handleCancelledPayment() {
     if (path.startsWith("/check/")) return loadCheck();
     if (path === "/staff") {
       if (!authToken) return goTo("/admin?next=/staff");
-      if (!authUser || !["staff", "admin"].includes(authUser.role)) return goTo("/");
+      if (!hasPermission("waiver.scan")) return goTo("/");
       return loadReport();
     }
     if (path === "/admin") {
       if (!authToken) return;
-      if (authUser?.role !== "admin") return goTo("/staff");
+      if (!hasPermission("admin.panel")) return goTo("/staff");
       return loadAdminData();
     }
     if (path === "/success") {

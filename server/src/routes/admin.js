@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import { Attraction } from "../models/Attraction.js";
 import { Waiver } from "../models/Waiver.js";
 import { User } from "../models/User.js";
-import { requireAuth, requireRoles } from "../lib/auth.js";
+import { requireAuth, requirePermissions, requireRoles } from "../lib/auth.js";
 import { nowMs, perfLog } from "../lib/perf.js";
 import { waiverDisplayId } from "../lib/folio.js";
 import { WaiverAuditEvent } from "../models/WaiverAuditEvent.js";
@@ -83,7 +83,7 @@ function mapWaiverRow(w) {
 export function adminRoutes({ jwtSecret }) {
   const router = Router();
 
-  router.use(requireAuth(jwtSecret), requireRoles("admin"));
+  router.use(requireAuth(jwtSecret), requireRoles("admin"), requirePermissions("admin.panel"));
 
   router.get("/attractions", async (_req, res) => {
     const items = await Attraction.find().sort({ createdAt: -1 }).lean();

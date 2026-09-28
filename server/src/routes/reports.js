@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requireAuth, requireRoles } from "../lib/auth.js";
+import { requireAuth, requirePermissions, requireRoles } from "../lib/auth.js";
 import { Waiver } from "../models/Waiver.js";
 import { verifyWaiverToken } from "../lib/token.js";
 import { nowMs, perfLog } from "../lib/perf.js";
@@ -11,7 +11,10 @@ export function reportRoutes({ jwtSecret }) {
   const router = Router();
   router.use(requireAuth(jwtSecret), requireRoles("admin", "staff"));
 
-  router.post("/waivers/:id/review", async (req, res) => {
+  router.post(
+    "/waivers/:id/review",
+    requirePermissions("waiver.review", "waiver.comment"),
+    async (req, res) => {
     const decision = String(req.body?.decision || "").trim();
     const comment = String(req.body?.comment || "").trim();
 
@@ -67,9 +70,10 @@ export function reportRoutes({ jwtSecret }) {
         reviewedAt: waiver.review.reviewedAt
       }
     });
-  });
+    }
+  );
 
-  router.get("/validate/:token", async (req, res) => {
+  router.get("/validate/:token", requirePermissions("waiver.scan"), async (req, res) => {
     try {
       const payload = verifyWaiverToken(req.params.token, jwtSecret);
       const waiverId = payload.waiverId;

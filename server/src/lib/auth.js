@@ -59,3 +59,41 @@ export function requireRoles(...roles) {
     return next();
   };
 }
+
+// Permisos de negocio centralizados. La autorización siempre se aplica en el
+// backend; el frontend únicamente refleja estos permisos en la interfaz.
+export const ROLE_PERMISSIONS = Object.freeze({
+  staff: Object.freeze([
+    "auth.login",
+    "waiver.scan",
+    "waiver.read.scanned",
+    "waiver.review",
+    "waiver.comment",
+    "waiver.schedule.assign",
+    "waiver.ticket.print"
+  ]),
+  admin: Object.freeze([
+    "auth.login",
+    "waiver.scan",
+    "waiver.read.scanned",
+    "waiver.review",
+    "waiver.comment",
+    "waiver.schedule.assign",
+    "waiver.ticket.print",
+    "waiver.history.read",
+    "waiver.export",
+    "waiver.delete",
+    "users.manage",
+    "settings.manage",
+    "admin.panel"
+  ])
+});
+
+export function requirePermissions(...permissions) {
+  return (req, res, next) => {
+    const granted = ROLE_PERMISSIONS[req.user?.role] || [];
+    const allowed = permissions.every((permission) => granted.includes(permission));
+    if (!allowed) return res.status(403).json({ error: "No autorizado." });
+    return next();
+  };
+}
