@@ -45,9 +45,13 @@ const waiverSchema = new mongoose.Schema(
       signatureImage: { type: String, default: "" }
     },
     waiverTextSnapshot: { type: String, required: true },
-    /** Primera validación por staff (GET /reports/validate); el QR deja de ser válido después. */
+    visitDate: { type: String, default: null },
+    assignedAt: { type: Date, default: null },
+    validatedAt: { type: Date, default: null },
+    validatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    /** Solo registros anteriores: consumo del QR de un uso. Las visitas nuevas no lo consumen. */
     qrConsumedAt: { type: Date, default: null },
-    status: { type: String, enum: ["signed", "revoked"], default: "signed" }
+    status: { type: String, enum: ["pending_validation", "validated", "signed", "revoked"], default: "pending_validation" }
   },
   { timestamps: true }
 );

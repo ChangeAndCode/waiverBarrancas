@@ -19,7 +19,7 @@ function waiverAdminReportFilter(req) {
   const query = {};
   if (req.query.attractionId) query.attractionId = req.query.attractionId;
   const st = String(req.query.status || "").trim();
-  if (st === "signed" || st === "revoked") query.status = st;
+  if (["signed", "revoked", "pending_validation", "validated"].includes(st)) query.status = st;
   if (req.query.from || req.query.to) {
     query.createdAt = {};
     if (req.query.from) query.createdAt.$gte = new Date(req.query.from);
@@ -71,6 +71,10 @@ function mapWaiverRow(w) {
     consumedAlcoholOrDrugs: w.answers?.consumedAlcoholOrDrugs,
     acceptsSafetyRules: w.answers?.acceptsSafetyRules,
     status: w.status,
+    visitDate: w.visitDate || "",
+    assignedAt: w.assignedAt || null,
+    validatedAt: w.validatedAt || null,
+    validatedBy: w.validatedBy || "",
     qrConsumedAt: w.qrConsumedAt || null,
     createdAt: w.createdAt
   };
@@ -181,8 +185,16 @@ export function adminRoutes({ jwtSecret }) {
       durationMs: nowMs() - listAt
     });
 
+    const [pendingCount, validatedCount] = await Promise.all(
+      ["pending_validation", "validated"].map((status) =>
+        filter.status ? (filter.status === status ? total : 0) : Waiver.countDocuments({ ...filter, status })
+      )
+    );
     res.json({
-      summary: { total, signed: signedCount, revoked: revokedCount },
+      summary: {
+        total, signed: signedCount, revoked: revokedCount,
+        pending_validation: pendingCount, validated: validatedCount
+      },
       page,
       pageSize,
       total,
@@ -231,6 +243,10 @@ export function adminRoutes({ jwtSecret }) {
       "consumedAlcoholOrDrugs",
       "acceptsSafetyRules",
       "status",
+      "visitDate",
+      "assignedAt",
+      "validatedAt",
+      "validatedBy",
       "qrConsumedAt",
       "createdAt"
     ];
@@ -266,6 +282,10 @@ export function adminRoutes({ jwtSecret }) {
           csvCell(r.consumedAlcoholOrDrugs),
           csvCell(r.acceptsSafetyRules),
           csvCell(r.status),
+          csvCell(r.visitDate),
+          csvCell(r.assignedAt ? new Date(r.assignedAt).toISOString() : ""),
+          csvCell(r.validatedAt ? new Date(r.validatedAt).toISOString() : ""),
+          csvCell(r.validatedBy),
           csvCell(r.qrConsumedAt ? new Date(r.qrConsumedAt).toISOString() : ""),
           csvCell(r.createdAt ? new Date(r.createdAt).toISOString() : "")
         ].join(",")

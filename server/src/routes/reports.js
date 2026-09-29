@@ -6,6 +6,9 @@ import { nowMs, perfLog } from "../lib/perf.js";
 import { waiverDisplayId } from "../lib/folio.js";
 import { getWaiverQrExpiresAt, isWaiverQrExpired } from "../lib/waiverValidity.js";
 
+import { parkDateTime } from "../../../shared/visitSchedule.js";
+import { visitQrResult } from "../lib/visitQr.js";
+
 export function reportRoutes({ jwtSecret }) {
   const router = Router();
   router.use(requireAuth(jwtSecret), requireRoles("admin", "staff"));
@@ -21,8 +24,20 @@ export function reportRoutes({ jwtSecret }) {
         operation: "reports_validate_find_by_id",
         durationMs: nowMs() - firstLookupAt
       });
-      if (!waiver || waiver.status !== "signed") {
+      if (!waiver || waiver.status === "revoked") {
         return res.status(404).json({ valid: false, error: "Waiver inválido o revocado." });
+      }
+
+      if (waiver.visitDate) {
+        const result = visitQrResult(waiver);
+        if (result.valid) {
+          result.review = {
+            participant: waiver.participant, isMinor: waiver.isMinor, guardian: waiver.guardian,
+            answers: waiver.answers, signatureImage: waiver.signatureImage,
+            witness: waiver.witness, waiverTextSnapshot: waiver.waiverTextSnapshot
+          };
+        }
+        return res.json(result);
       }
 
       if (isWaiverQrExpired(waiver)) {
@@ -92,6 +107,39 @@ export function reportRoutes({ jwtSecret }) {
     }
   });
 
+  // Explicit Staff action: reading/scanning a new QR never approves or consumes it.
+  router.post("/validate/:token", async (req, res) => {
+    let payload;
+    try {
+      payload = verifyWaiverToken(req.params.token, jwtSecret);
+    } catch {
+      return res.status(400).json({ error: "Token inválido." });
+    }
+    try {
+      const waiver = await Waiver.findById(payload.waiverId).lean();
+      if (!waiver || waiver.status === "revoked") {
+        return res.status(404).json({ error: "Waiver inválido o revocado." });
+      }
+      if (!waiver.visitDate || waiver.status !== "pending_validation") {
+        return res.status(409).json({ error: "La carta ya fue validada o no pertenece al flujo de visitas." });
+      }
+      const assignedAt = parkDateTime(waiver.visitDate, req.body?.assignedTime);
+      if (!req.body?.assignedTime || !assignedAt || assignedAt.getTime() < Date.now()) {
+        return res.status(400).json({ error: "Indica una hora válida, no pasada, del día de visita (hora del parque)." });
+      }
+      const updated = await Waiver.findOneAndUpdate(
+        { _id: waiver._id, status: "pending_validation", visitDate: waiver.visitDate },
+        { $set: { assignedAt, status: "validated", validatedAt: new Date(), validatedBy: req.auth.sub } },
+        { new: true }
+      ).lean();
+      if (!updated) return res.status(409).json({ error: "La carta cambió. Consulta nuevamente el QR." });
+      return res.json(visitQrResult(updated));
+    } catch (error) {
+      console.error("Validación de visita:", error.message);
+      return res.status(500).json({ error: "No se pudo validar la visita." });
+    }
+  });
+
   router.get("/waivers", async (req, res) => {
     const query = {};
     if (req.query.attractionId) query.attractionId = req.query.attractionId;
@@ -122,7 +170,7 @@ export function reportRoutes({ jwtSecret }) {
     );
 
     res.json({
-      summary: { total, signed, revoked },
+      summary: { total, signed, revoked, pending_validation: waivers.filter((w) => w.status === "pending_validation").length, validated: waivers.filter((w) => w.status === "validated").length },
       byAttraction,
       waivers: waivers.map((w) => ({
         id: waiverDisplayId(w),
@@ -130,6 +178,8 @@ export function reportRoutes({ jwtSecret }) {
         fullName: w.participant.fullName,
         email: w.participant.email,
         status: w.status,
+        visitDate: w.visitDate,
+        assignedAt: w.assignedAt,
         createdAt: w.createdAt
       }))
     });

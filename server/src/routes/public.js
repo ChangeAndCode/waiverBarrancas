@@ -12,6 +12,8 @@ import { getWaiverQrExpiresAt, isWaiverQrExpired } from "../lib/waiverValidity.j
 import { canSendEmails, sendWaiverQrEmail } from "../lib/email.js";
 import { nowMs, perfLog } from "../lib/perf.js";
 import Stripe from "stripe";
+import { canRegisterVisit } from "../../../shared/visitSchedule.js";
+import { visitQrResult } from "../lib/visitQr.js";
 
 function meaningfulText(value, minLength = 2) {
   return String(value || "").trim().length >= minLength;
@@ -183,7 +185,8 @@ export function publicRoutes({ jwtSecret }) {
       signatureImage,
       guardian,
       witness,
-      locale
+      locale,
+      visitDate
     } = req.body ?? {};
 
     if ((!attractionId && (!Array.isArray(attractionIds) || !attractionIds.length)) || !participant || !answers || acceptedText !== true || !signatureName || !signatureImage) {
@@ -224,6 +227,10 @@ export function publicRoutes({ jwtSecret }) {
     }
     if (answers.acceptsSafetyRules !== true) {
       return res.status(400).json({ error: "Debes aceptar reglas de seguridad." });
+    }
+
+    if (!canRegisterVisit(visitDate)) {
+      return res.status(400).json({ error: "Elige un día de visita con al menos 24 horas de anticipación al inicio de ese día (hora del parque)." });
     }
 
     const age = calculateAge(participant.birthDate);
@@ -279,6 +286,8 @@ export function publicRoutes({ jwtSecret }) {
     const createWaiverAt = nowMs();
     const waiver = await Waiver.create({
       folio,
+      visitDate,
+      status: "pending_validation",
       attractionId: attraction._id,
       attractionName,
       attractionIds: orderedAttractions.map((a) => a._id),
@@ -300,51 +309,26 @@ export function publicRoutes({ jwtSecret }) {
 
     const token = signWaiverToken(waiver._id.toString(), jwtSecret);
     const qrUrl = `${baseUrlFromRequest(req)}/check/${token}`;
-    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=420x420&data=${encodeURIComponent(qrUrl)}`;
     const logoUrl = `${baseUrlFromRequest(req)}/branding/logobarrancas.png`;
-    const emailSent = canSendEmails();
-
-    res.status(201).json({
-      folio: waiver.folio,
-      waiverId: waiver.folio,
-      token,
-      qrUrl,
-      emailSent,
-      signedAt: waiver.createdAt
-    });
-
-    // Enviar correo fuera del ciclo de respuesta para reducir latencia en picos.
-    if (emailSent) {
-      setImmediate(async () => {
-        const emailAt = nowMs();
-        try {
-          await sendWaiverQrEmail({
-            to: participant.email,
-            participantName: participant.fullName,
-            attractionName: waiver.attractionName,
-            attractionNames: waiver.attractionNames,
-            waiverId: waiver.folio,
-            signedAt,
-            qrUrl,
-            qrImageUrl,
-            logoUrl,
-            locale
-          });
-          perfLog("async_email", {
-            provider: "resend",
-            ok: true,
-            durationMs: nowMs() - emailAt
-          });
-        } catch (error) {
-          perfLog("async_email", {
-            provider: "resend",
-            ok: false,
-            durationMs: nowMs() - emailAt
-          });
-          console.error("No se pudo enviar correo con Resend:", error.message);
-        }
-      });
+    let emailSent = false;
+    if (canSendEmails()) {
+      try {
+        const result = await sendWaiverQrEmail({
+          to: participant.email, participantName: participant.fullName,
+          attractionName: waiver.attractionName, attractionNames: waiver.attractionNames,
+          waiverId: waiver.folio, signedAt, qrUrl, logoUrl, locale, visitDate
+        });
+        emailSent = result.sent;
+      } catch (error) {
+        console.error("No se pudo enviar correo con Resend:", error.message);
+      }
     }
+    // The waiver is already saved: an email failure must not encourage a duplicate registration.
+    res.status(201).json({
+      folio: waiver.folio, waiverId: waiver.folio, token, qrUrl, emailSent,
+      signedAt: waiver.createdAt, status: waiver.status, visitDate: waiver.visitDate,
+      assignedAt: null, expiresAt: null
+    });
   });
 
   router.get("/check/:token", async (req, res) => {
@@ -353,9 +337,11 @@ export function publicRoutes({ jwtSecret }) {
       const payload = verifyWaiverToken(token, jwtSecret);
       const waiver = await Waiver.findById(payload.waiverId).lean();
 
-      if (!waiver || waiver.status !== "signed") {
+      if (!waiver || waiver.status === "revoked") {
         return res.status(404).json({ valid: false, error: "Waiver inválido o revocado." });
       }
+
+      if (waiver.visitDate) return res.json(visitQrResult(waiver));
 
       if (isWaiverQrExpired(waiver)) {
         return res.json({
