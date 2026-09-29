@@ -7,6 +7,37 @@ import { waiverDisplayId } from "../lib/folio.js";
 import { getWaiverQrExpiresAt, isWaiverQrExpired } from "../lib/waiverValidity.js";
 import { WaiverAuditEvent } from "../models/WaiverAuditEvent.js";
 
+function mapStaffWaiver(waiver) {
+  return {
+    databaseId: waiver._id,
+    id: waiverDisplayId(waiver),
+    attractionId: waiver.attractionId,
+    attractionName: waiver.attractionName,
+    attractionNames: waiver.attractionNames || [],
+    fullName: waiver.participant?.fullName || "",
+    birthDate: waiver.participant?.birthDate || "",
+    participant: waiver.participant,
+    isMinor: waiver.isMinor,
+    guardian: waiver.guardian
+      ? {
+          fullName: waiver.guardian.fullName,
+          relation: waiver.guardian.relation,
+          phone: waiver.guardian.phone,
+          email: waiver.guardian.email
+        }
+      : null,
+    answers: waiver.answers,
+    acceptedText: waiver.acceptedText,
+    signatureName: waiver.signatureName,
+    hasSignature: Boolean(waiver.signatureImage),
+    witness: { hasSignature: Boolean(waiver.witness?.signatureImage) },
+    waiverTextSnapshot: waiver.waiverTextSnapshot,
+    signedAt: waiver.createdAt,
+    status: waiver.status === "signed" ? "pending" : waiver.status,
+    review: waiver.review || null
+  };
+}
+
 export function reportRoutes({ jwtSecret }) {
   const router = Router();
   router.use(requireAuth(jwtSecret), requireRoles("admin", "staff"));
@@ -103,16 +134,7 @@ export function reportRoutes({ jwtSecret }) {
         return res.json({
           valid: true,
           requiresReview: true,
-          waiver: {
-            databaseId: waiver._id,
-            id: waiverDisplayId(waiver),
-            attractionName: waiver.attractionName,
-            fullName: waiver.participant.fullName,
-            birthDate: waiver.participant.birthDate,
-            signedAt: waiver.createdAt,
-            status: "pending",
-            review: waiver.review || null
-          }
+          waiver: mapStaffWaiver({ ...waiver, status: "pending" })
         });
       }
 
@@ -166,23 +188,14 @@ export function reportRoutes({ jwtSecret }) {
 
       return res.json({
         valid: true,
-        waiver: {
-          databaseId: consumed._id,
-          id: waiverDisplayId(consumed),
-          attractionName: consumed.attractionName,
-          fullName: consumed.participant.fullName,
-          birthDate: consumed.participant.birthDate,
-          signedAt: consumed.createdAt,
-          status: consumed.status,
-          review: consumed.review || null
-        }
+        waiver: mapStaffWaiver(consumed)
       });
     } catch (_error) {
       return res.status(400).json({ valid: false, error: "Token inválido." });
     }
   });
 
-  router.get("/waivers", async (req, res) => {
+  router.get("/waivers", requireRoles("admin"), async (req, res) => {
     const query = {};
     if (req.query.attractionId) query.attractionId = req.query.attractionId;
     if (req.query.from || req.query.to) {

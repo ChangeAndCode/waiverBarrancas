@@ -1301,7 +1301,7 @@ async function handleCancelledPayment() {
     if (path === "/staff") {
       if (!authToken) return goTo("/admin?next=/staff");
       if (!hasPermission("waiver.scan")) return goTo("/");
-      return loadReport();
+      return;
     }
     if (path === "/admin") {
       if (!authToken) return;
@@ -1463,7 +1463,21 @@ async function handleCancelledPayment() {
           <p class="ok">VÁLIDO — registrado</p>
           <p><b>Nombre:</b> {staffScanResult.waiver.fullName}</p>
           <p><b>Atracción:</b> {staffScanResult.waiver.attractionName}</p>
-          <p><b>Folio:</b> {staffScanResult.waiver.id}</p>
+           <p><b>Folio:</b> {staffScanResult.waiver.id}</p>
+           <p><b>Correo:</b> {staffScanResult.waiver.participant?.email}</p>
+           <p><b>Teléfono:</b> {staffScanResult.waiver.participant?.phone}</p>
+           <p><b>Estado de procedencia:</b> {staffScanResult.waiver.participant?.cityState}</p>
+           <details>
+             <summary>Ver carta responsiva completa</summary>
+             <div class="waiver-preview">{@html staffScanResult.waiver.waiverTextSnapshot || "Sin texto disponible."}</div>
+             <p><b>Género:</b> {staffScanResult.waiver.participant?.gender}</p>
+             <p><b>Fecha de nacimiento:</b> {staffScanResult.waiver.participant?.birthDate}</p>
+             <p><b>Contacto de emergencia:</b> {staffScanResult.waiver.participant?.emergencyContactName} — {staffScanResult.waiver.participant?.emergencyContactPhone}</p>
+             <p><b>Medicamentos:</b> {staffScanResult.waiver.participant?.medications}</p>
+             <p><b>Condición médica:</b> {staffScanResult.waiver.answers?.hasMedicalCondition ? "Sí" : "No"}</p>
+             <p><b>Firma registrada:</b> {staffScanResult.waiver.hasSignature ? "Sí" : "No"}</p>
+             <p><b>Firma de testigo:</b> {staffScanResult.waiver.witness?.hasSignature ? "Sí" : "No"}</p>
+           </details>
           {#if staffScanResult.waiver.review?.decision}
             <p><b>Decisión:</b> {staffScanResult.waiver.review.decision === "approved" ? "Aprobado" : "Rechazado"}</p>
             {#if staffScanResult.waiver.review.comment}
