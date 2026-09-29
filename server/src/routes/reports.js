@@ -32,6 +32,7 @@ function mapStaffWaiver(waiver) {
     hasSignature: Boolean(waiver.signatureImage),
     witness: { hasSignature: Boolean(waiver.witness?.signatureImage) },
     waiverTextSnapshot: waiver.waiverTextSnapshot,
+    schedule: waiver.schedule || null,
     signedAt: waiver.createdAt,
     status: waiver.status === "signed" ? "pending" : waiver.status,
     review: waiver.review || null
@@ -101,6 +102,52 @@ export function reportRoutes({ jwtSecret }) {
         reviewedAt: waiver.review.reviewedAt
       }
     });
+    }
+  );
+
+  router.patch(
+    "/waivers/:id/schedule",
+    requirePermissions("waiver.schedule.assign"),
+    async (req, res) => {
+      const qrToken = String(req.body?.qrToken || "").trim();
+      const date = String(req.body?.date || "").trim();
+      const group = String(req.body?.group || "").trim();
+      const time = String(req.body?.time || "").trim();
+      const attractionId = String(req.body?.attractionId || "").trim();
+
+      if (!qrToken || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !group || !time || !attractionId) {
+        return res.status(400).json({ error: "Fecha, grupo, horario, atracción y QR son obligatorios." });
+      }
+
+      let payload;
+      try {
+        payload = verifyWaiverToken(qrToken, jwtSecret);
+      } catch (_error) {
+        return res.status(400).json({ error: "QR inválido." });
+      }
+      if (String(payload.waiverId) !== String(req.params.id)) {
+        return res.status(403).json({ error: "El QR no corresponde al waiver." });
+      }
+
+      const waiver = await Waiver.findById(req.params.id);
+      if (!waiver || ["revoked", "rejected"].includes(waiver.status)) {
+        return res.status(404).json({ error: "Waiver no encontrado o no disponible." });
+      }
+      if (![String(waiver.attractionId), ...(waiver.attractionIds || []).map(String)].includes(attractionId)) {
+        return res.status(400).json({ error: "La atracción no pertenece al waiver." });
+      }
+
+      const attractionName = waiver.attractionName;
+      waiver.schedule = { date, group, time, attractionId, attractionName, assignedBy: req.user._id, assignedAt: new Date() };
+      await waiver.save();
+      await WaiverAuditEvent.create({
+        waiverId: waiver._id,
+        userId: req.user._id,
+        userRole: req.user.role,
+        action: "schedule_assigned",
+        metadata: { date, group, time, attractionId, attractionName }
+      });
+      return res.json({ ok: true, waiver: { id: waiverDisplayId(waiver), schedule: waiver.schedule } });
     }
   );
 

@@ -80,8 +80,11 @@
   let paymentSuccessInFlight = false;
 
   let staffScanPaste = "";
+  let staffQrToken = "";
   let staffScanResult = null;
   let staffReviewComment = "";
+  let staffSchedule = { date: "", group: "", time: "", attractionId: "" };
+  let staffScheduleBusy = false;
   let staffReviewBusy = false;
   let staffScanBusy = false;
   let staffScanError = "";
@@ -963,11 +966,12 @@ async function handleCancelledPayment() {
       return;
     }
     staffScanBusy = true;
+    staffQrToken = token;
     staffScanError = "";
     try {
       staffScanResult = await api(`/reports/validate/${encodeURIComponent(token)}`);
       staffReviewComment = "";
-      await loadReport();
+      staffSchedule = { date: "", group: "", time: "", attractionId: staffScanResult?.waiver?.attractionId || "" };
     } catch (e) {
       staffScanResult = null;
       staffScanError = e.message;
@@ -995,11 +999,32 @@ async function handleCancelledPayment() {
         ...staffScanResult,
         waiver: { ...staffScanResult.waiver, review: result.waiver }
       };
-      await loadReport();
     } catch (e) {
       staffScanError = e.message;
     } finally {
       staffReviewBusy = false;
+    }
+  }
+
+  async function assignStaffSchedule() {
+    const databaseId = staffScanResult?.waiver?.databaseId;
+    const qrToken = staffQrToken || extractWaiverTokenFromText(staffScanPaste);
+    if (!databaseId || !qrToken) {
+      staffScanError = "Conserva el QR escaneado o pegado para asignar el horario.";
+      return;
+    }
+    staffScheduleBusy = true;
+    staffScanError = "";
+    try {
+      const result = await api(`/reports/waivers/${databaseId}/schedule`, "PATCH", {
+        ...staffSchedule,
+        qrToken
+      });
+      staffScanResult = { ...staffScanResult, waiver: { ...staffScanResult.waiver, schedule: result.waiver.schedule } };
+    } catch (e) {
+      staffScanError = e.message;
+    } finally {
+      staffScheduleBusy = false;
     }
   }
 
@@ -1478,6 +1503,21 @@ async function handleCancelledPayment() {
              <p><b>Firma registrada:</b> {staffScanResult.waiver.hasSignature ? "Sí" : "No"}</p>
              <p><b>Firma de testigo:</b> {staffScanResult.waiver.witness?.hasSignature ? "Sí" : "No"}</p>
            </details>
+          <div class="schedule-box">
+            <h4>Asignar horario</h4>
+            <label class="field-label" for="staffScheduleDate">Fecha</label>
+            <input id="staffScheduleDate" type="date" bind:value={staffSchedule.date} />
+            <label class="field-label" for="staffScheduleGroup">Grupo</label>
+            <input id="staffScheduleGroup" bind:value={staffSchedule.group} placeholder="Grupo 1" />
+            <label class="field-label" for="staffScheduleTime">Horario</label>
+            <input id="staffScheduleTime" type="time" bind:value={staffSchedule.time} />
+            <button type="button" on:click={assignStaffSchedule} disabled={staffScheduleBusy}>
+              {staffScheduleBusy ? "Asignando..." : "Asignar horario"}
+            </button>
+            {#if staffScanResult.waiver.schedule?.date}
+              <p class="ok"><b>Horario asignado:</b> {staffScanResult.waiver.schedule.date} · {staffScanResult.waiver.schedule.time} · {staffScanResult.waiver.schedule.group}</p>
+            {/if}
+          </div>
           {#if staffScanResult.waiver.review?.decision}
             <p><b>Decisión:</b> {staffScanResult.waiver.review.decision === "approved" ? "Aprobado" : "Rechazado"}</p>
             {#if staffScanResult.waiver.review.comment}
@@ -1509,14 +1549,6 @@ async function handleCancelledPayment() {
       {/if}
 
       <h3>Últimos registros</h3>
-      {#if report.summary}
-        <p><b>Total:</b> {report.summary.total} | <b>Pendientes:</b> {report.summary.pending} | <b>Aprobados:</b> {report.summary.approved} | <b>Rechazados:</b> {report.summary.rejected} | <b>Revocados:</b> {report.summary.revoked}</p>
-      {/if}
-      {#each report.waivers as item}
-        <div class="item">
-          <p>{item.fullName} - {item.attractionName} - {new Date(item.createdAt).toLocaleString()}</p>
-        </div>
-      {/each}
     </section>
   {:else if path === "/admin"}
     <section class="card">

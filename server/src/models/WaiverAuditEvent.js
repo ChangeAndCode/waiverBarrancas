@@ -31,6 +31,7 @@ const waiverAuditEventSchema = new mongoose.Schema(
         "rejected",
         "revoked",
         "status_changed"
+        ,"schedule_assigned"
       ],
       required: true,
       index: true
