@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { testApp, payload, staffToken, adminToken, secret, staff } from "./fixture.js";
+import { testApp, payload, staffToken, adminToken, secret, staff, visitor } from "./fixture.js";
 import { verifyWaiverToken, signWaiverToken } from "../src/lib/token.js";
 import { signAuthToken } from "../src/lib/auth.js";
 import { parkDate } from "../../shared/visitSchedule.js";
@@ -25,10 +25,10 @@ test("registration, access control, Staff assignment, repeated scans, revocation
     const r = await request("/public/waivers", "POST", { ...payload(), visitDate: day });
     assert.equal(r.status, 400);
   }
-  const malicious = { ...payload(), status: "validated", assignedAt: "2099-01-01", validatedBy: String(staff._id) };
+  const malicious = { ...payload(), status: "approved", assignedAt: "2099-01-01", validatedBy: String(staff._id) };
   const created = await request("/public/waivers", "POST", malicious);
   assert.equal(created.status, 201);
-  assert.equal(created.data.status, "pending_validation");
+  assert.equal(created.data.status, "pending");
   assert.equal(created.data.assignedAt, null);
   assert.equal(created.data.emailSent, false);
   const token = created.data.token;
@@ -44,9 +44,11 @@ test("registration, access control, Staff assignment, repeated scans, revocation
   assert.notEqual(another.data.folio, created.data.folio);
   assert.equal((await request(`/public/check/${token}`)).data.accessAuthorized, false);
   assert.equal((await request(`/reports/validate/${token}`)).status, 401);
-  const visitorToken = signAuthToken({ ...staff, role: "visitor" }, secret);
+
+
+const visitorToken = signAuthToken(visitor, secret);
   assert.equal((await request(`/reports/validate/${token}`, "POST", { assignedTime: "09:00" }, visitorToken)).status, 403);
-  assert.equal((await request(`/reports/validate/${token}`, "GET", undefined, staffToken)).data.waiver.status, "pending_validation");
+  assert.equal((await request(`/reports/validate/${token}`, "GET", undefined, staffToken)).data.waiver.status, "pending");
   assert.equal(stored.qrConsumedAt, null);
   assert.equal((await request(`/reports/validate/${token}`, "GET", undefined, staffToken)).data.review.participant.fullName, "Visitante Prueba");
   assert.equal((await request(`/public/check/${token}`)).data.review, undefined);
@@ -56,7 +58,7 @@ test("registration, access control, Staff assignment, repeated scans, revocation
   // Two staff members cannot overwrite one another's approval.
   const approvals = await Promise.all(["09:00", "10:00"].map((assignedTime) => request(`/reports/validate/${token}`, "POST", { assignedTime }, staffToken)));
   assert.deepEqual(approvals.map((r) => r.status).sort(), [200, 409]);
-  assert.equal(stored.status, "validated");
+  assert.equal(stored.status, "approved");
   assert.equal(String(stored.validatedBy), String(staff._id));
   assert.ok(stored.validatedAt);
   for (let i = 0; i < 2; i++) {
@@ -64,14 +66,22 @@ test("registration, access control, Staff assignment, repeated scans, revocation
     assert.equal((await request(`/public/check/${token}`)).data.accessAuthorized, true);
   }
   assert.equal(stored.qrConsumedAt, null);
-  const report = await request("/admin/reports/waivers?status=pending_validation", "GET", undefined, adminToken);
-  assert.equal(report.data.summary.pending_validation, 1);
-  assert.equal(report.data.summary.validated, 0);
-  assert.equal(report.data.items[0].visitDate, created.data.visitDate);
+const report = await request(
+  "/admin/reports/waivers?status=approved",
+  "GET",
+  undefined,
+  adminToken
+);
+
+assert.equal(report.data.summary.approved, 1);
+assert.equal(report.data.summary.pending, 0);
+assert.equal(report.data.items[0].visitDate, created.data.visitDate);
+
+
   stored.status = "revoked";
   assert.equal((await request(`/public/check/${token}`)).status, 404);
   assert.equal((await request(`/reports/validate/${token}`, "POST", { assignedTime: "11:00" }, staffToken)).status, 404);
-  stored.status = "validated";
+  stored.status = "approved";
   stored.assignedAt = new Date("2020-01-01T15:00:00Z");
   assert.equal((await request(`/public/check/${token}`)).data.reason, "qr_expired");
   assert.equal((await request(`/reports/validate/${token}`, "GET", undefined, staffToken)).data.reason, "qr_expired");
@@ -109,5 +119,5 @@ test("provider failure preserves registration and returns the QR without claimin
   assert.equal(result.emailSent, false);
   assert.ok(result.qrUrl.includes(result.token));
   assert.equal(records.size, 1);
-  assert.equal([...records.values()][0].status, "pending_validation");
+  assert.equal([...records.values()][0].status, "pending");
 });

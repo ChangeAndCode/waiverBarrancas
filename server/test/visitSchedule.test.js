@@ -22,12 +22,12 @@ test("park-local assignment and expiry cross month/year boundaries independently
 });
 
 test("pending QR cannot authorize admission; assigned QR remains usable through the following day", () => {
-  const waiver = { visitDate: "2026-10-02", assignedAt: null, status: "pending_validation", participant: { fullName: "Prueba" } };
+  const waiver = { visitDate: "2026-10-02", assignedAt: null, status: "pending", participant: { fullName: "Prueba" } };
   assert.equal(getWaiverQrExpiresAt(waiver), null);
   assert.equal(isWaiverQrExpired(waiver, new Date("2030-01-01")), false);
   assert.equal(visitQrResult(waiver).accessAuthorized, false);
   waiver.assignedAt = parkDateTime(waiver.visitDate, "09:00");
-  waiver.status = "validated";
+  waiver.status = "approved";
   assert.equal(visitQrResult(waiver, new Date("2026-10-04T05:59:59.999Z")).accessAuthorized, true);
   assert.equal(isWaiverQrExpired(waiver, new Date("2026-10-04T06:00:00Z")), true);
 });

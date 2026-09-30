@@ -49,9 +49,25 @@ const waiverSchema = new mongoose.Schema(
     assignedAt: { type: Date, default: null },
     validatedAt: { type: Date, default: null },
     validatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
-    /** Solo registros anteriores: consumo del QR de un uso. Las visitas nuevas no lo consumen. */
+
+    review: {
+      decision: {
+        type: String,
+        enum: ["approved", "rejected", null],
+        default: null
+      },
+      comment: { type: String, trim: true, default: "" },
+      reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+      reviewedAt: { type: Date, default: null }
+    },
+
     qrConsumedAt: { type: Date, default: null },
-    status: { type: String, enum: ["pending_validation", "validated", "signed", "revoked"], default: "pending_validation" }
+
+  status: {
+    type: String,
+    enum: ["pending", "approved", "rejected", "revoked"],
+    default: "pending"
+  }
   },
   { timestamps: true }
 );

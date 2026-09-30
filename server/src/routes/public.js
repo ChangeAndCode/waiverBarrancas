@@ -4,6 +4,7 @@ import { Attraction } from "../models/Attraction.js";
 import { PARK_ATTRACTIONS, sortParkAttractions } from "../lib/parkAttractions.js";
 import { Waiver } from "../models/Waiver.js";
 import { WaiverDraft } from "../models/WaiverDraft.js";
+import { WaiverAuditEvent } from "../models/WaiverAuditEvent.js";
 import { signWaiverToken, verifyWaiverToken } from "../lib/token.js";
 import { renderWaiverTextForSignature } from "../lib/waiverText.js";
 import { WAIVER_TEXT_EN_HTML } from "../lib/waiverTextEn.js";
@@ -287,7 +288,7 @@ export function publicRoutes({ jwtSecret }) {
     const waiver = await Waiver.create({
       folio,
       visitDate,
-      status: "pending_validation",
+      status: "pending",
       attractionId: attraction._id,
       attractionName,
       attractionIds: orderedAttractions.map((a) => a._id),
@@ -300,15 +301,30 @@ export function publicRoutes({ jwtSecret }) {
       signatureName,
       signatureImage,
       witness,
-      waiverTextSnapshot: renderWaiverTextForSignature(waiverTextSource, signedAt)
+      waiverTextSnapshot: renderWaiverTextForSignature(waiverTextSource, signedAt),
+      status: "pending"
     });
     perfLog("db_query", {
       operation: "waiver_create",
       durationMs: nowMs() - createWaiverAt
     });
+    await WaiverAuditEvent.create({
+      waiverId: waiver._id,
+      action: "waiver_created",
+      userRole: null,
+      metadata: { source: "public_form" }
+    });
 
-    const token = signWaiverToken(waiver._id.toString(), jwtSecret);
-    const qrUrl = `${baseUrlFromRequest(req)}/check/${token}`;
+const token = signWaiverToken(waiver._id.toString(), jwtSecret);
+const qrUrl = `${baseUrlFromRequest(req)}/check/${token}`;
+const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=420x420&data=${encodeURIComponent(qrUrl)}`;
+
+await WaiverAuditEvent.create({
+  waiverId: waiver._id,
+  action: "qr_generated",
+  userRole: null,
+  metadata: { source: "jwt_qr" }
+});
     const logoUrl = `${baseUrlFromRequest(req)}/branding/logobarrancas.png`;
     let emailSent = false;
     if (canSendEmails()) {
@@ -331,54 +347,97 @@ export function publicRoutes({ jwtSecret }) {
     });
   });
 
-  router.get("/check/:token", async (req, res) => {
-    const { token } = req.params;
-    try {
-      const payload = verifyWaiverToken(token, jwtSecret);
-      const waiver = await Waiver.findById(payload.waiverId).lean();
+router.get("/check/:token", async (req, res) => {
+  const { token } = req.params;
 
-      if (!waiver || waiver.status === "revoked") {
-        return res.status(404).json({ valid: false, error: "Waiver inválido o revocado." });
-      }
+  try {
+    const payload = verifyWaiverToken(token, jwtSecret);
+    const waiver = await Waiver.findById(payload.waiverId).lean();
 
-      if (waiver.visitDate) return res.json(visitQrResult(waiver));
-
-      if (isWaiverQrExpired(waiver)) {
-        return res.json({
-          valid: false,
-          reason: "qr_expired",
-          signedAt: waiver.createdAt,
-          expiresAt: getWaiverQrExpiresAt(waiver.createdAt),
-          attractionName: waiver.attractionName,
-          fullName: waiver.participant.fullName
-        });
-      }
-
-      if (waiver.qrConsumedAt) {
-        return res.json({
-          valid: false,
-          reason: "qr_already_used",
-          usedAt: waiver.qrConsumedAt,
-          attractionName: waiver.attractionName,
-          fullName: waiver.participant.fullName
-        });
-      }
-
-      return res.json({
-        valid: true,
-        waiver: {
-          id: waiverDisplayId(waiver),
-          attractionName: waiver.attractionName,
-          fullName: waiver.participant.fullName,
-          birthDate: waiver.participant.birthDate,
-          signedAt: waiver.createdAt,
-          status: waiver.status
-        }
+    // No existe o fue revocado.
+    if (!waiver || waiver.status === "revoked") {
+      return res.status(404).json({
+        valid: false,
+        error: "Waiver inválido o revocado."
       });
-    } catch (_error) {
-      return res.status(400).json({ valid: false, error: "Token inválido." });
     }
-  });
 
-  return router;
+    // Flujo nuevo de visitas programadas.
+    // visitQrResult determina autorización, horario y expiración.
+    if (waiver.visitDate) {
+      return res.json(visitQrResult(waiver));
+    }
+
+    // Flujo legacy: QR con vigencia original.
+    if (isWaiverQrExpired(waiver)) {
+      return res.json({
+        valid: false,
+        reason: "qr_expired",
+        signedAt: waiver.createdAt,
+        expiresAt: getWaiverQrExpiresAt(waiver.createdAt),
+        attractionName: waiver.attractionName,
+        fullName: waiver.participant.fullName
+      });
+    }
+
+    // Waiver rechazado por Staff.
+    if (waiver.status === "rejected") {
+      return res.json({
+        valid: false,
+        reason: "waiver_rejected",
+        status: "rejected",
+        comment: waiver.review?.comment || "",
+        attractionName: waiver.attractionName,
+        fullName: waiver.participant.fullName,
+        signedAt: waiver.createdAt
+      });
+    }
+
+    // Pendiente de revisión/validación.
+    // "signed" se conserva únicamente por compatibilidad con registros anteriores.
+    if (["pending", "signed"].includes(waiver.status)) {
+      return res.json({
+        valid: false,
+        reason: "waiver_pending",
+        status: "pending",
+        attractionName: waiver.attractionName,
+        fullName: waiver.participant.fullName,
+        signedAt: waiver.createdAt
+      });
+    }
+
+    // Compatibilidad con QRs legacy de un solo uso.
+    if (waiver.qrConsumedAt) {
+      return res.json({
+        valid: false,
+        reason: "qr_already_used",
+        usedAt: waiver.qrConsumedAt,
+        attractionName: waiver.attractionName,
+        fullName: waiver.participant.fullName
+      });
+    }
+
+    // Waiver válido/aprobado.
+    return res.json({
+      valid: true,
+      status: waiver.status,
+      waiver: {
+        id: waiverDisplayId(waiver),
+        attractionName: waiver.attractionName,
+        fullName: waiver.participant.fullName,
+        birthDate: waiver.participant.birthDate,
+        signedAt: waiver.createdAt,
+        status: waiver.status,
+        review: waiver.review || null
+      }
+    });
+  } catch (_error) {
+    return res.status(400).json({
+      valid: false,
+      error: "Token inválido."
+    });
+  }
+});
+
+return router;
 }

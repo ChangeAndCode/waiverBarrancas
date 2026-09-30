@@ -10,7 +10,7 @@ export function visitQrResult(waiver, now = new Date()) {
   }
   return {
     valid: true,
-    accessAuthorized: waiver.status === "validated" && Boolean(waiver.assignedAt),
+    accessAuthorized: waiver.status === "approved" && Boolean(waiver.assignedAt),
     waiver: {
       id: waiverDisplayId(waiver), fullName: waiver.participant.fullName,
       attractionName: waiver.attractionName, birthDate: waiver.participant.birthDate,

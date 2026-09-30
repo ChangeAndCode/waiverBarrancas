@@ -6,6 +6,7 @@ import { User } from "../models/User.js";
 import { requireAuth, requireRoles } from "../lib/auth.js";
 import { nowMs, perfLog } from "../lib/perf.js";
 import { waiverDisplayId } from "../lib/folio.js";
+import { WaiverAuditEvent } from "../models/WaiverAuditEvent.js";
 
 const MAX_CSV_ROWS = 50000;
 const waiverSelectLean =
@@ -19,7 +20,9 @@ function waiverAdminReportFilter(req) {
   const query = {};
   if (req.query.attractionId) query.attractionId = req.query.attractionId;
   const st = String(req.query.status || "").trim();
-  if (["signed", "revoked", "pending_validation", "validated"].includes(st)) query.status = st;
+  if (["pending", "approved", "rejected", "revoked"].includes(st)) {
+    query.status = st === "pending" ? { $in: ["pending", "signed"] } : st;
+  }
   if (req.query.from || req.query.to) {
     query.createdAt = {};
     if (req.query.from) query.createdAt.$gte = new Date(req.query.from);
@@ -44,6 +47,7 @@ function csvCell(v) {
 
 function mapWaiverRow(w) {
   return {
+    databaseId: w._id,
     id: waiverDisplayId(w),
     attractionId: w.attractionId,
     attractionName: w.attractionName,
@@ -70,13 +74,13 @@ function mapWaiverRow(w) {
     hasMedicalCondition: w.answers?.hasMedicalCondition,
     consumedAlcoholOrDrugs: w.answers?.consumedAlcoholOrDrugs,
     acceptsSafetyRules: w.answers?.acceptsSafetyRules,
-    status: w.status,
+    status: w.status === "signed" ? "pending" : w.status,
     visitDate: w.visitDate || "",
     assignedAt: w.assignedAt || null,
     validatedAt: w.validatedAt || null,
     validatedBy: w.validatedBy || "",
     qrConsumedAt: w.qrConsumedAt || null,
-    createdAt: w.createdAt
+    createdAt: w.createdAt,
   };
 }
 
@@ -141,7 +145,72 @@ export function adminRoutes({ jwtSecret }) {
       { new: true }
     ).lean();
     if (!updated) return res.status(404).json({ error: "Waiver no encontrado." });
+    await WaiverAuditEvent.create({
+      waiverId: updated._id,
+      userId: req.user._id,
+      userRole: req.user.role,
+      action: "revoked",
+      comment: String(req.body?.comment || "").trim()
+    });
     res.json(updated);
+  });
+
+  router.patch("/waivers/:id/status", async (req, res) => {
+    const nextStatus = String(req.body?.status || "").trim();
+    const comment = String(req.body?.comment || "").trim();
+    const allowedStatuses = ["pending", "approved", "rejected", "revoked"];
+
+    if (!allowedStatuses.includes(nextStatus)) return res.status(400).json({ error: "Estado inválido." });
+    if (nextStatus === "rejected" && !comment) {
+      return res.status(400).json({ error: "El comentario es obligatorio al rechazar." });
+    }
+    if (comment.length > 1000) return res.status(400).json({ error: "El comentario no puede exceder 1000 caracteres." });
+
+    const waiver = await Waiver.findById(req.params.id);
+    if (!waiver) return res.status(404).json({ error: "Waiver no encontrado." });
+
+    const previousStatus = waiver.status;
+    waiver.status = nextStatus;
+    if (["approved", "rejected"].includes(nextStatus)) {
+      waiver.review = { decision: nextStatus, comment, reviewedBy: req.user._id, reviewedAt: new Date() };
+    }
+    await waiver.save();
+    await WaiverAuditEvent.create({
+      waiverId: waiver._id,
+      userId: req.user._id,
+      userRole: req.user.role,
+      action: "status_changed",
+      comment,
+      metadata: { from: previousStatus, to: nextStatus }
+    });
+    if (comment) {
+      await WaiverAuditEvent.create({
+        waiverId: waiver._id,
+        userId: req.user._id,
+        userRole: req.user.role,
+        action: "comment_added",
+        comment,
+        metadata: { source: "status_change" }
+      });
+    }
+
+    return res.json({ ok: true, waiver: { id: waiverDisplayId(waiver), status: waiver.status, review: waiver.review || null } });
+  });
+
+  router.get("/waivers/:id/history", async (req, res) => {
+    const waiver = await Waiver.findById(req.params.id).select("_id folio").lean();
+    if (!waiver) return res.status(404).json({ error: "Waiver no encontrado." });
+
+    const events = await WaiverAuditEvent.find({ waiverId: waiver._id })
+      .populate("userId", "name email role")
+      .sort({ createdAt: 1 })
+      .lean();
+
+    res.json({
+      waiverId: waiver._id,
+      folio: waiver.folio,
+      events
+    });
   });
 
   router.get("/reports/waivers", async (req, res) => {
@@ -156,15 +225,26 @@ export function adminRoutes({ jwtSecret }) {
       operation: "admin_reports_waivers_count",
       durationMs: nowMs() - countAt
     });
-    let signedCount = 0;
+    let pendingCount = 0;
+    let approvedCount = 0;
+    let rejectedCount = 0;
     let revokedCount = 0;
     if (filter.status) {
-      signedCount = filter.status === "signed" ? total : 0;
+    const isPendingFilter =
+      typeof filter.status === "object" &&
+      Array.isArray(filter.status.$in) &&
+      filter.status.$in.includes("pending");
+
+      pendingCount = isPendingFilter ? total : 0;
+      approvedCount = filter.status === "approved" ? total : 0;
+      rejectedCount = filter.status === "rejected" ? total : 0;
       revokedCount = filter.status === "revoked" ? total : 0;
     } else {
       const statusCountsAt = nowMs();
-      [signedCount, revokedCount] = await Promise.all([
-        Waiver.countDocuments({ ...filter, status: "signed" }),
+      [pendingCount, approvedCount, rejectedCount, revokedCount] = await Promise.all([
+        Waiver.countDocuments({ ...filter, status: { $in: ["pending", "signed"] } }),
+        Waiver.countDocuments({ ...filter, status: "approved" }),
+        Waiver.countDocuments({ ...filter, status: "rejected" }),
         Waiver.countDocuments({ ...filter, status: "revoked" })
       ]);
       perfLog("db_query", {
@@ -173,32 +253,31 @@ export function adminRoutes({ jwtSecret }) {
       });
     }
 
-    const listAt = nowMs();
-    const raw = await Waiver.find(filter)
-      .select(waiverSelectLean)
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * pageSize)
-      .limit(pageSize)
-      .lean();
-    perfLog("db_query", {
-      operation: "admin_reports_waivers_list",
-      durationMs: nowMs() - listAt
-    });
+  const listAt = nowMs();
+  const raw = await Waiver.find(filter)
+    .select(waiverSelectLean)
+    .sort({ createdAt: -1 })
+    .skip((page - 1) * pageSize)
+    .limit(pageSize)
+    .lean();
 
-    const [pendingCount, validatedCount] = await Promise.all(
-      ["pending_validation", "validated"].map((status) =>
-        filter.status ? (filter.status === status ? total : 0) : Waiver.countDocuments({ ...filter, status })
-      )
-    );
-    res.json({
-      summary: {
-        total, signed: signedCount, revoked: revokedCount,
-        pending_validation: pendingCount, validated: validatedCount
-      },
-      page,
-      pageSize,
+  perfLog("db_query", {
+    operation: "admin_reports_waivers_list",
+    durationMs: nowMs() - listAt
+  });
+
+  res.json({
+    summary: {
       total,
-      items: raw.map(mapWaiverRow)
+      pending: pendingCount,
+      approved: approvedCount,
+      rejected: rejectedCount,
+      revoked: revokedCount
+    },
+    page,
+    pageSize,
+    total,
+    items: raw.map(mapWaiverRow)
     });
   });
 

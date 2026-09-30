@@ -11,11 +11,36 @@ import { adminRoutes } from "../src/routes/admin.js";
 import { signAuthToken } from "../src/lib/auth.js";
 import { PARK_ATTRACTIONS } from "../src/lib/parkAttractions.js";
 import { earliestVisitDate } from "../../shared/visitSchedule.js";
+import { WaiverAuditEvent } from "../src/models/WaiverAuditEvent.js";
+import { User } from "../src/models/User.js";
 
 export const secret = "local-test-secret-not-for-production";
-export const staff = { _id: new mongoose.Types.ObjectId(), name: "Staff Prueba", email: "staff@example.test", role: "staff" };
+export const staff = {
+  _id: new mongoose.Types.ObjectId(),
+  name: "Staff Prueba",
+  email: "staff@example.test",
+  role: "staff",
+  active: true
+};
+
+export const admin = {
+  _id: new mongoose.Types.ObjectId(),
+  name: "Admin Prueba",
+  email: "admin@example.test",
+  role: "admin",
+  active: true
+};
+
+export const visitor = {
+  _id: new mongoose.Types.ObjectId(),
+  name: "Visitor Prueba",
+  email: "visitor@example.test",
+  role: "visitor",
+  active: true
+};
+
 export const staffToken = signAuthToken(staff, secret);
-export const adminToken = signAuthToken({ ...staff, role: "admin" }, secret);
+export const adminToken = signAuthToken(admin, secret);
 export const attractions = PARK_ATTRACTIONS.map((a) => ({ ...a, _id: String(new mongoose.Types.ObjectId()), active: true, waiverText: "<p>Carta de prueba local sin efectos legales.</p>" }));
 export const signature = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=";
 export function payload() {
@@ -30,10 +55,21 @@ export function payload() {
 export function testApp(mock) {
   const records = new Map();
   let seq = 0;
-  const matches = (w, filter) => Object.entries(filter).every(([key, value]) => {
-    if (value === null) return w[key] == null;
-    return String(w[key]) === String(value);
-  });
+ const matches = (w, filter) => Object.entries(filter).every(([key, value]) => {
+  if (value === null) {
+    return w[key] == null;
+  }
+
+  if (
+    value &&
+    typeof value === "object" &&
+    Array.isArray(value.$in)
+  ) {
+    return value.$in.some((item) => String(w[key]) === String(item));
+  }
+
+  return String(w[key]) === String(value);
+});
   const query = (rows) => {
     let offset = 0, limit = rows.length;
     return { select() { return this; }, sort() { return this; }, skip(n) { offset = n; return this; }, limit(n) { limit = n; return this; },
@@ -58,6 +94,33 @@ export function testApp(mock) {
     Object.assign(w, update.$set);
     return structuredClone(w);
   } }));
+  mock.method(WaiverAuditEvent, "create", async (data) => ({
+    ...data,
+    _id: new mongoose.Types.ObjectId(),
+    createdAt: new Date()
+  }));
+mock.method(User, "findOne", (filter) => ({
+  select() {
+    return this;
+  },
+  async lean() {
+    const userId = String(filter?._id);
+
+    if (userId === String(staff._id)) {
+      return { ...staff };
+    }
+
+    if (userId === String(visitor._id)) {
+      return { ...visitor };
+    }
+
+    if (userId === String(admin._id)) {
+      return { ...admin };
+    }
+
+    return null;
+  }
+}));
   const app = express();
   app.use(express.json({ limit: "12mb" }));
   app.use("/api/public", publicRoutes({ jwtSecret: secret }));

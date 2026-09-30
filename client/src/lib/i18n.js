@@ -18,8 +18,8 @@ export const NATIONALITY_EN = {
 export const messages = {
   es: {
     siteTitle: "Carta responsiva - Parque Barrancas",
-    admin: "Admin",
-    logout: "Salir",
+    admin: "Iniciar Sesión",
+    logout: "Cerrar Sesión",
   langEs: "Español",
   langEn: "English",
     waiverTitle: "Registro",
@@ -115,7 +115,7 @@ export const messages = {
   },
   en: {
     siteTitle: "Digital Waiver - Parque Barrancas",
-    admin: "Admin",
+    admin: "Log in",
     logout: "Log out",
     langEs: "Español",
     langEn: "English",
