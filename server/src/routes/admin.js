@@ -75,8 +75,12 @@ function mapWaiverRow(w) {
     consumedAlcoholOrDrugs: w.answers?.consumedAlcoholOrDrugs,
     acceptsSafetyRules: w.answers?.acceptsSafetyRules,
     status: w.status === "signed" ? "pending" : w.status,
+    visitDate: w.visitDate || "",
+    assignedAt: w.assignedAt || null,
+    validatedAt: w.validatedAt || null,
+    validatedBy: w.validatedBy || "",
     qrConsumedAt: w.qrConsumedAt || null,
-    createdAt: w.createdAt
+    createdAt: w.createdAt,
   };
 }
 
@@ -226,7 +230,12 @@ export function adminRoutes({ jwtSecret }) {
     let rejectedCount = 0;
     let revokedCount = 0;
     if (filter.status) {
-      pendingCount = filter.status === "pending" ? total : 0;
+    const isPendingFilter =
+      typeof filter.status === "object" &&
+      Array.isArray(filter.status.$in) &&
+      filter.status.$in.includes("pending");
+
+      pendingCount = isPendingFilter ? total : 0;
       approvedCount = filter.status === "approved" ? total : 0;
       rejectedCount = filter.status === "rejected" ? total : 0;
       revokedCount = filter.status === "revoked" ? total : 0;
@@ -244,24 +253,31 @@ export function adminRoutes({ jwtSecret }) {
       });
     }
 
-    const listAt = nowMs();
-    const raw = await Waiver.find(filter)
-      .select(waiverSelectLean)
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * pageSize)
-      .limit(pageSize)
-      .lean();
-    perfLog("db_query", {
-      operation: "admin_reports_waivers_list",
-      durationMs: nowMs() - listAt
-    });
+  const listAt = nowMs();
+  const raw = await Waiver.find(filter)
+    .select(waiverSelectLean)
+    .sort({ createdAt: -1 })
+    .skip((page - 1) * pageSize)
+    .limit(pageSize)
+    .lean();
 
-    res.json({
-      summary: { total, pending: pendingCount, approved: approvedCount, rejected: rejectedCount, revoked: revokedCount },
-      page,
-      pageSize,
+  perfLog("db_query", {
+    operation: "admin_reports_waivers_list",
+    durationMs: nowMs() - listAt
+  });
+
+  res.json({
+    summary: {
       total,
-      items: raw.map(mapWaiverRow)
+      pending: pendingCount,
+      approved: approvedCount,
+      rejected: rejectedCount,
+      revoked: revokedCount
+    },
+    page,
+    pageSize,
+    total,
+    items: raw.map(mapWaiverRow)
     });
   });
 
@@ -306,6 +322,10 @@ export function adminRoutes({ jwtSecret }) {
       "consumedAlcoholOrDrugs",
       "acceptsSafetyRules",
       "status",
+      "visitDate",
+      "assignedAt",
+      "validatedAt",
+      "validatedBy",
       "qrConsumedAt",
       "createdAt"
     ];
@@ -341,6 +361,10 @@ export function adminRoutes({ jwtSecret }) {
           csvCell(r.consumedAlcoholOrDrugs),
           csvCell(r.acceptsSafetyRules),
           csvCell(r.status),
+          csvCell(r.visitDate),
+          csvCell(r.assignedAt ? new Date(r.assignedAt).toISOString() : ""),
+          csvCell(r.validatedAt ? new Date(r.validatedAt).toISOString() : ""),
+          csvCell(r.validatedBy),
           csvCell(r.qrConsumedAt ? new Date(r.qrConsumedAt).toISOString() : ""),
           csvCell(r.createdAt ? new Date(r.createdAt).toISOString() : "")
         ].join(",")

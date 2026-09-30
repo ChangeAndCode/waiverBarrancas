@@ -45,7 +45,11 @@ const waiverSchema = new mongoose.Schema(
       signatureImage: { type: String, default: "" }
     },
     waiverTextSnapshot: { type: String, required: true },
-    /** Primera validación por staff (GET /reports/validate); el QR deja de ser válido después. */
+    visitDate: { type: String, default: null },
+    assignedAt: { type: Date, default: null },
+    validatedAt: { type: Date, default: null },
+    validatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+
     review: {
       decision: {
         type: String,
@@ -56,12 +60,14 @@ const waiverSchema = new mongoose.Schema(
       reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
       reviewedAt: { type: Date, default: null }
     },
+
     qrConsumedAt: { type: Date, default: null },
-    status: {
-      type: String,
-      enum: ["pending", "approved", "rejected", "revoked"],
-      default: "pending"
-    }
+
+  status: {
+    type: String,
+    enum: ["pending", "approved", "rejected", "revoked"],
+    default: "pending"
+  }
   },
   { timestamps: true }
 );
