@@ -57,6 +57,8 @@ const waiverSchema = new mongoose.Schema(
       reviewedAt: { type: Date, default: null }
     },
     qrConsumedAt: { type: Date, default: null },
+    deletedAt: { type: Date, default: null },
+    deletedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
     schedule: {
       date: { type: String, trim: true, default: "" },
       group: { type: String, trim: true, default: "" },

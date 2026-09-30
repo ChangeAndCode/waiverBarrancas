@@ -105,6 +105,9 @@
   let adminStatusDrafts = {};
   let adminStatusComments = {};
   let adminStatusEditRow = null;
+  let adminDeleteRow = null;
+  let adminDeleteSuccess = "";
+  let adminDeleteBusy = false;
   let adminReportFilters = { attractionId: "", from: "", to: "", status: "", q: "" };
   let adminAttractionEditId = "";
   let editWaiverText = "";
@@ -1361,6 +1364,31 @@ async function handleCancelledPayment() {
     await loadAdminData();
   }
 
+  function openAdminDeleteModal(row) {
+    adminDeleteRow = row;
+    adminDeleteSuccess = "";
+  }
+
+  async function deleteAdminWaiver() {
+    const row = adminDeleteRow;
+    if (!row) return;
+    if (adminDeleteBusy) return;
+    adminDeleteBusy = true;
+    try {
+      await api(`/admin/waivers/${row.databaseId}`, "DELETE", { comment: "Eliminado por Admin." });
+      adminDeleteSuccess = `El waiver ${row.id} fue eliminado con éxito.`;
+      setTimeout(async () => {
+        adminDeleteRow = null;
+        adminDeleteSuccess = "";
+        adminDeleteBusy = false;
+        await loadAdminReport();
+      }, 3000);
+    } catch (e) {
+      message = e.message;
+      adminDeleteBusy = false;
+    }
+  }
+
   async function bootstrap() {
     message = "";
     document.documentElement.lang = locale === "en" ? "en" : "es";
@@ -1832,12 +1860,51 @@ async function handleCancelledPayment() {
                           <path d="m13.8 7.2 3 3"></path>
                         </svg>
                       </button>
+                      <button
+                        type="button"
+                        class="icon-button delete-icon-button"
+                        title="Eliminar waiver"
+                        aria-label={`Eliminar waiver ${row.id}`}
+                        on:click={() => openAdminDeleteModal(row)}
+                        disabled={loading}
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                          <path d="M4 7h16"></path>
+                          <path d="M9 7V4h6v3"></path>
+                          <path d="m7 7 1 13h8l1-13"></path>
+                          <path d="M10 11v5M14 11v5"></path>
+                        </svg>
+                      </button>
                     </td>
                   </tr>
                 {/each}
               </tbody>
             </table>
           </div>
+          {#if adminDeleteRow}
+            <div
+              class="status-modal-backdrop"
+              role="presentation"
+              on:click={(event) => { if (event.target === event.currentTarget) adminDeleteRow = null; }}
+              on:keydown={(event) => { if (event.key === "Escape") adminDeleteRow = null; }}
+            >
+              <div class="status-modal" role="dialog" aria-modal="true" aria-labelledby="delete-modal-title">
+                <div class="history-modal-header">
+                  <h3 id="delete-modal-title">Eliminar waiver</h3>
+                </div>
+                {#if adminDeleteSuccess}
+                  <p class="delete-success">{adminDeleteSuccess}</p>
+                {:else}
+                  <p>¿Está seguro de eliminar el waiver <b>{adminDeleteRow.id}</b>?</p>
+                  <p class="muted">El registro se ocultará de las consultas normales y conservará su auditoría.</p>
+                  <div class="history-modal-footer">
+                    <button type="button" class="danger-button" on:click={deleteAdminWaiver} disabled={adminDeleteBusy}>Eliminar</button>
+                    <button type="button" class="secondary" on:click={() => (adminDeleteRow = null)} disabled={adminDeleteBusy}>Cancelar</button>
+                  </div>
+                {/if}
+              </div>
+            </div>
+          {/if}
           {#if adminStatusEditRow}
             <div class="status-modal-backdrop">
               <div class="status-modal" role="dialog" aria-modal="true" aria-labelledby="status-modal-title">
@@ -2914,6 +2981,33 @@ async function handleCancelledPayment() {
     background: #1976d2;
     color: #fff;
     border-color: #125da5;
+  }
+  .delete-icon-button {
+    background: #fff;
+    color: #000;
+    border: 1px solid #c9c9c9;
+  }
+  .delete-icon-button:hover,
+  .delete-icon-button:focus-visible {
+    background: #b42318;
+    color: #fff;
+    border-color: #8f1d14;
+  }
+  .danger-button {
+    background: #b42318;
+    color: #fff;
+    border: 1px solid #8f1d14;
+  }
+  .danger-button:hover,
+  .danger-button:focus-visible {
+    background: #8f1d14;
+    border-color: #74170f;
+  }
+  .delete-success {
+    margin: 22px 0;
+    color: #137333;
+    font-weight: 700;
+    text-align: center;
   }
   .status-modal-backdrop {
     position: fixed;

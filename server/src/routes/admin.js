@@ -17,7 +17,7 @@ function escapeRegex(s) {
 }
 
 function waiverAdminReportFilter(req) {
-  const query = {};
+  const query = { deletedAt: null };
   if (req.query.attractionId) query.attractionId = req.query.attractionId;
   const st = String(req.query.status || "").trim();
   if (["pending", "approved", "rejected", "revoked"].includes(st)) {
@@ -128,7 +128,7 @@ export function adminRoutes({ jwtSecret }) {
   });
 
   router.get("/waivers", async (req, res) => {
-    const query = {};
+    const query = { deletedAt: null };
     if (req.query.attractionId) query.attractionId = req.query.attractionId;
     const waivers = await Waiver.find(query).sort({ createdAt: -1 }).limit(200).lean();
     res.json(waivers);
@@ -149,6 +149,25 @@ export function adminRoutes({ jwtSecret }) {
       comment: String(req.body?.comment || "").trim()
     });
     res.json(updated);
+  });
+
+  router.delete("/waivers/:id", async (req, res) => {
+    const comment = String(req.body?.comment || "").trim();
+    const waiver = await Waiver.findOne({ _id: req.params.id, deletedAt: null });
+    if (!waiver) return res.status(404).json({ error: "Waiver no encontrado." });
+
+    waiver.deletedAt = new Date();
+    waiver.deletedBy = req.user._id;
+    await waiver.save();
+    await WaiverAuditEvent.create({
+      waiverId: waiver._id,
+      userId: req.user._id,
+      userRole: req.user.role,
+      action: "waiver_deleted",
+      comment,
+      metadata: { source: "admin_delete", logical: true }
+    });
+    return res.json({ ok: true, waiver: { id: waiverDisplayId(waiver), deletedAt: waiver.deletedAt } });
   });
 
   router.patch("/waivers/:id/status", async (req, res) => {

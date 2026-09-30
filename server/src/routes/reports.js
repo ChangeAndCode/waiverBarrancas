@@ -60,7 +60,7 @@ export function reportRoutes({ jwtSecret }) {
       return res.status(400).json({ error: "El comentario no puede exceder 1000 caracteres." });
     }
 
-    const waiver = await Waiver.findOne({ _id: req.params.id, status: { $in: ["pending", "signed"] } });
+    const waiver = await Waiver.findOne({ _id: req.params.id, deletedAt: null, status: { $in: ["pending", "signed"] } });
     if (!waiver) {
       return res.status(404).json({ error: "Waiver no encontrado o revocado." });
     }
@@ -129,7 +129,7 @@ export function reportRoutes({ jwtSecret }) {
         return res.status(403).json({ error: "El QR no corresponde al waiver." });
       }
 
-      const waiver = await Waiver.findById(req.params.id);
+      const waiver = await Waiver.findOne({ _id: req.params.id, deletedAt: null });
       if (!waiver || ["revoked", "rejected"].includes(waiver.status)) {
         return res.status(404).json({ error: "Waiver no encontrado o no disponible." });
       }
@@ -168,7 +168,7 @@ export function reportRoutes({ jwtSecret }) {
         return res.status(403).json({ error: "El QR no corresponde al waiver." });
       }
 
-      const waiver = await Waiver.findById(req.params.id).lean();
+      const waiver = await Waiver.findOne({ _id: req.params.id, deletedAt: null }).lean();
       if (!waiver || ["revoked", "rejected"].includes(waiver.status)) {
         return res.status(404).json({ error: "Waiver no encontrado o no disponible." });
       }
@@ -209,7 +209,7 @@ export function reportRoutes({ jwtSecret }) {
       const waiverId = payload.waiverId;
 
       const firstLookupAt = nowMs();
-      const waiver = await Waiver.findById(waiverId).lean();
+      const waiver = await Waiver.findOne({ _id: waiverId, deletedAt: null }).lean();
       perfLog("db_query", {
         operation: "reports_validate_find_by_id",
         durationMs: nowMs() - firstLookupAt
@@ -260,7 +260,7 @@ export function reportRoutes({ jwtSecret }) {
 
       if (!consumed) {
         const secondLookupAt = nowMs();
-        const again = await Waiver.findById(waiverId).lean();
+        const again = await Waiver.findOne({ _id: waiverId, deletedAt: null }).lean();
         perfLog("db_query", {
           operation: "reports_validate_find_by_id_retry",
           durationMs: nowMs() - secondLookupAt

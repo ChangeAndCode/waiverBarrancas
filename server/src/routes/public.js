@@ -365,7 +365,7 @@ export function publicRoutes({ jwtSecret }) {
     const { token } = req.params;
     try {
       const payload = verifyWaiverToken(token, jwtSecret);
-      const waiver = await Waiver.findById(payload.waiverId).lean();
+      const waiver = await Waiver.findOne({ _id: payload.waiverId, deletedAt: null }).lean();
 
       if (waiver?.status === "revoked") {
         return res.json({

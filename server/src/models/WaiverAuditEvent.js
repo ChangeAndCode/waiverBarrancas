@@ -33,6 +33,7 @@ const waiverAuditEventSchema = new mongoose.Schema(
         "status_changed"
         ,"schedule_assigned"
         ,"ticket_printed"
+        ,"waiver_deleted"
       ],
       required: true,
       index: true
