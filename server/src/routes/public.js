@@ -4,6 +4,7 @@ import { Attraction } from "../models/Attraction.js";
 import { PARK_ATTRACTIONS, sortParkAttractions } from "../lib/parkAttractions.js";
 import { Waiver } from "../models/Waiver.js";
 import { WaiverDraft } from "../models/WaiverDraft.js";
+import { WaiverAuditEvent } from "../models/WaiverAuditEvent.js";
 import { signWaiverToken, verifyWaiverToken } from "../lib/token.js";
 import { renderWaiverTextForSignature } from "../lib/waiverText.js";
 import { WAIVER_TEXT_EN_HTML } from "../lib/waiverTextEn.js";
@@ -298,10 +299,22 @@ export function publicRoutes({ jwtSecret }) {
       operation: "waiver_create",
       durationMs: nowMs() - createWaiverAt
     });
+    await WaiverAuditEvent.create({
+      waiverId: waiver._id,
+      action: "waiver_created",
+      userRole: null,
+      metadata: { source: "public_form" }
+    });
 
     const token = signWaiverToken(waiver._id.toString(), jwtSecret);
     const qrUrl = `${baseUrlFromRequest(req)}/check/${token}`;
     const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=420x420&data=${encodeURIComponent(qrUrl)}`;
+    await WaiverAuditEvent.create({
+      waiverId: waiver._id,
+      action: "qr_generated",
+      userRole: null,
+      metadata: { source: "jwt_qr" }
+    });
     const logoUrl = `${baseUrlFromRequest(req)}/branding/logobarrancas.png`;
     const emailSent = canSendEmails();
 
@@ -354,6 +367,18 @@ export function publicRoutes({ jwtSecret }) {
       const payload = verifyWaiverToken(token, jwtSecret);
       const waiver = await Waiver.findById(payload.waiverId).lean();
 
+      if (waiver?.status === "revoked") {
+        return res.json({
+          valid: false,
+          reason: "waiver_revoked",
+          status: "revoked",
+          comment: waiver.review?.comment || "",
+          attractionName: waiver.attractionName,
+          fullName: waiver.participant.fullName,
+          signedAt: waiver.createdAt
+        });
+      }
+
       if (!waiver || waiver.status === "revoked") {
         return res.status(404).json({ valid: false, error: "Waiver inválido o revocado." });
       }
@@ -366,6 +391,29 @@ export function publicRoutes({ jwtSecret }) {
           expiresAt: getWaiverQrExpiresAt(waiver.createdAt),
           attractionName: waiver.attractionName,
           fullName: waiver.participant.fullName
+        });
+      }
+
+      if (waiver.status === "rejected") {
+        return res.json({
+          valid: false,
+          reason: "waiver_rejected",
+          status: "rejected",
+          comment: waiver.review?.comment || "",
+          attractionName: waiver.attractionName,
+          fullName: waiver.participant.fullName,
+          signedAt: waiver.createdAt
+        });
+      }
+
+      if (["pending", "signed"].includes(waiver.status)) {
+        return res.json({
+          valid: false,
+          reason: "waiver_pending",
+          status: "pending",
+          attractionName: waiver.attractionName,
+          fullName: waiver.participant.fullName,
+          signedAt: waiver.createdAt
         });
       }
 

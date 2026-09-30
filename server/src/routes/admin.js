@@ -144,6 +144,7 @@ export function adminRoutes({ jwtSecret }) {
     await WaiverAuditEvent.create({
       waiverId: updated._id,
       userId: req.user._id,
+      userRole: req.user.role,
       action: "revoked",
       comment: String(req.body?.comment || "").trim()
     });
@@ -173,10 +174,21 @@ export function adminRoutes({ jwtSecret }) {
     await WaiverAuditEvent.create({
       waiverId: waiver._id,
       userId: req.user._id,
+      userRole: req.user.role,
       action: "status_changed",
       comment,
       metadata: { from: previousStatus, to: nextStatus }
     });
+    if (comment) {
+      await WaiverAuditEvent.create({
+        waiverId: waiver._id,
+        userId: req.user._id,
+        userRole: req.user.role,
+        action: "comment_added",
+        comment,
+        metadata: { source: "status_change" }
+      });
+    }
 
     return res.json({ ok: true, waiver: { id: waiverDisplayId(waiver), status: waiver.status, review: waiver.review || null } });
   });
@@ -187,7 +199,7 @@ export function adminRoutes({ jwtSecret }) {
 
     const events = await WaiverAuditEvent.find({ waiverId: waiver._id })
       .populate("userId", "name email role")
-      .sort({ createdAt: -1 })
+      .sort({ createdAt: 1 })
       .lean();
 
     res.json({

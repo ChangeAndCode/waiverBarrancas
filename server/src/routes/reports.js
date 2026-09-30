@@ -41,9 +41,20 @@ export function reportRoutes({ jwtSecret }) {
     await WaiverAuditEvent.create({
       waiverId: waiver._id,
       userId: req.user._id,
+      userRole: req.user.role,
       action: decision,
       comment
     });
+    if (comment) {
+      await WaiverAuditEvent.create({
+        waiverId: waiver._id,
+        userId: req.user._id,
+        userRole: req.user.role,
+        action: "comment_added",
+        comment,
+        metadata: { source: "review" }
+      });
+    }
 
     return res.json({
       ok: true,
@@ -84,6 +95,23 @@ export function reportRoutes({ jwtSecret }) {
         });
       }
 
+      if (["pending", "signed"].includes(waiver.status)) {
+        return res.json({
+          valid: true,
+          requiresReview: true,
+          waiver: {
+            databaseId: waiver._id,
+            id: waiverDisplayId(waiver),
+            attractionName: waiver.attractionName,
+            fullName: waiver.participant.fullName,
+            birthDate: waiver.participant.birthDate,
+            signedAt: waiver.createdAt,
+            status: "pending",
+            review: waiver.review || null
+          }
+        });
+      }
+
       if (waiver.qrConsumedAt) {
         return res.json({
           valid: false,
@@ -96,7 +124,7 @@ export function reportRoutes({ jwtSecret }) {
 
       const consumeAt = nowMs();
       const consumed = await Waiver.findOneAndUpdate(
-        { _id: waiverId, status: { $in: ["pending", "signed", "approved"] }, qrConsumedAt: null },
+        { _id: waiverId, status: "approved", qrConsumedAt: null },
         { $set: { qrConsumedAt: new Date() } },
         { new: true }
       ).lean();
@@ -127,6 +155,7 @@ export function reportRoutes({ jwtSecret }) {
       await WaiverAuditEvent.create({
         waiverId: consumed._id,
         userId: req.user._id,
+        userRole: req.user.role,
         action: "qr_validated",
         metadata: { source: "staff_validation" }
       });
