@@ -291,7 +291,8 @@ export function publicRoutes({ jwtSecret }) {
       signatureName,
       signatureImage,
       witness,
-      waiverTextSnapshot: renderWaiverTextForSignature(waiverTextSource, signedAt)
+      waiverTextSnapshot: renderWaiverTextForSignature(waiverTextSource, signedAt),
+      status: "pending"
     });
     perfLog("db_query", {
       operation: "waiver_create",
@@ -353,7 +354,7 @@ export function publicRoutes({ jwtSecret }) {
       const payload = verifyWaiverToken(token, jwtSecret);
       const waiver = await Waiver.findById(payload.waiverId).lean();
 
-      if (!waiver || waiver.status !== "signed") {
+      if (!waiver || waiver.status === "revoked") {
         return res.status(404).json({ valid: false, error: "Waiver inválido o revocado." });
       }
 
@@ -378,15 +379,40 @@ export function publicRoutes({ jwtSecret }) {
         });
       }
 
+      if (["pending", "signed"].includes(waiver.status)) {
+        return res.json({
+          valid: false,
+          reason: "waiver_pending",
+          status: "pending",
+          attractionName: waiver.attractionName,
+          fullName: waiver.participant.fullName,
+          signedAt: waiver.createdAt
+        });
+      }
+
+      if (waiver.status === "rejected") {
+        return res.json({
+          valid: false,
+          reason: "waiver_rejected",
+          status: waiver.status,
+          comment: waiver.review?.comment || "",
+          attractionName: waiver.attractionName,
+          fullName: waiver.participant.fullName,
+          signedAt: waiver.createdAt
+        });
+      }
+
       return res.json({
         valid: true,
+        status: waiver.status,
         waiver: {
           id: waiverDisplayId(waiver),
           attractionName: waiver.attractionName,
           fullName: waiver.participant.fullName,
           birthDate: waiver.participant.birthDate,
           signedAt: waiver.createdAt,
-          status: waiver.status
+          status: waiver.status,
+          review: waiver.review || null
         }
       });
     } catch (_error) {

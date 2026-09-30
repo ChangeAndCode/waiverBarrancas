@@ -20,7 +20,9 @@ function waiverAdminReportFilter(req) {
   const query = {};
   if (req.query.attractionId) query.attractionId = req.query.attractionId;
   const st = String(req.query.status || "").trim();
-  if (st === "signed" || st === "revoked") query.status = st;
+  if (["pending", "approved", "rejected", "revoked"].includes(st)) {
+    query.status = st === "pending" ? { $in: ["pending", "signed"] } : st;
+  }
   if (req.query.from || req.query.to) {
     query.createdAt = {};
     if (req.query.from) query.createdAt.$gte = new Date(req.query.from);
@@ -72,7 +74,7 @@ function mapWaiverRow(w) {
     hasMedicalCondition: w.answers?.hasMedicalCondition,
     consumedAlcoholOrDrugs: w.answers?.consumedAlcoholOrDrugs,
     acceptsSafetyRules: w.answers?.acceptsSafetyRules,
-    status: w.status,
+    status: w.status === "signed" ? "pending" : w.status,
     qrConsumedAt: w.qrConsumedAt || null,
     createdAt: w.createdAt
   };
@@ -148,6 +150,37 @@ export function adminRoutes({ jwtSecret }) {
     res.json(updated);
   });
 
+  router.patch("/waivers/:id/status", async (req, res) => {
+    const nextStatus = String(req.body?.status || "").trim();
+    const comment = String(req.body?.comment || "").trim();
+    const allowedStatuses = ["pending", "approved", "rejected", "revoked"];
+
+    if (!allowedStatuses.includes(nextStatus)) return res.status(400).json({ error: "Estado inválido." });
+    if (nextStatus === "rejected" && !comment) {
+      return res.status(400).json({ error: "El comentario es obligatorio al rechazar." });
+    }
+    if (comment.length > 1000) return res.status(400).json({ error: "El comentario no puede exceder 1000 caracteres." });
+
+    const waiver = await Waiver.findById(req.params.id);
+    if (!waiver) return res.status(404).json({ error: "Waiver no encontrado." });
+
+    const previousStatus = waiver.status;
+    waiver.status = nextStatus;
+    if (["approved", "rejected"].includes(nextStatus)) {
+      waiver.review = { decision: nextStatus, comment, reviewedBy: req.user._id, reviewedAt: new Date() };
+    }
+    await waiver.save();
+    await WaiverAuditEvent.create({
+      waiverId: waiver._id,
+      userId: req.user._id,
+      action: "status_changed",
+      comment,
+      metadata: { from: previousStatus, to: nextStatus }
+    });
+
+    return res.json({ ok: true, waiver: { id: waiverDisplayId(waiver), status: waiver.status, review: waiver.review || null } });
+  });
+
   router.get("/waivers/:id/history", async (req, res) => {
     const waiver = await Waiver.findById(req.params.id).select("_id folio").lean();
     if (!waiver) return res.status(404).json({ error: "Waiver no encontrado." });
@@ -176,15 +209,21 @@ export function adminRoutes({ jwtSecret }) {
       operation: "admin_reports_waivers_count",
       durationMs: nowMs() - countAt
     });
-    let signedCount = 0;
+    let pendingCount = 0;
+    let approvedCount = 0;
+    let rejectedCount = 0;
     let revokedCount = 0;
     if (filter.status) {
-      signedCount = filter.status === "signed" ? total : 0;
+      pendingCount = filter.status === "pending" ? total : 0;
+      approvedCount = filter.status === "approved" ? total : 0;
+      rejectedCount = filter.status === "rejected" ? total : 0;
       revokedCount = filter.status === "revoked" ? total : 0;
     } else {
       const statusCountsAt = nowMs();
-      [signedCount, revokedCount] = await Promise.all([
-        Waiver.countDocuments({ ...filter, status: "signed" }),
+      [pendingCount, approvedCount, rejectedCount, revokedCount] = await Promise.all([
+        Waiver.countDocuments({ ...filter, status: { $in: ["pending", "signed"] } }),
+        Waiver.countDocuments({ ...filter, status: "approved" }),
+        Waiver.countDocuments({ ...filter, status: "rejected" }),
         Waiver.countDocuments({ ...filter, status: "revoked" })
       ]);
       perfLog("db_query", {
@@ -206,7 +245,7 @@ export function adminRoutes({ jwtSecret }) {
     });
 
     res.json({
-      summary: { total, signed: signedCount, revoked: revokedCount },
+      summary: { total, pending: pendingCount, approved: approvedCount, rejected: rejectedCount, revoked: revokedCount },
       page,
       pageSize,
       total,
