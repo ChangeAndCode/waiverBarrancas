@@ -5,10 +5,56 @@ import { verifyWaiverToken } from "../lib/token.js";
 import { nowMs, perfLog } from "../lib/perf.js";
 import { waiverDisplayId } from "../lib/folio.js";
 import { getWaiverQrExpiresAt, isWaiverQrExpired } from "../lib/waiverValidity.js";
+import { WaiverAuditEvent } from "../models/WaiverAuditEvent.js";
 
 export function reportRoutes({ jwtSecret }) {
   const router = Router();
   router.use(requireAuth(jwtSecret), requireRoles("admin", "staff"));
+
+  router.post("/waivers/:id/review", async (req, res) => {
+    const decision = String(req.body?.decision || "").trim();
+    const comment = String(req.body?.comment || "").trim();
+
+    if (!["approved", "rejected"].includes(decision)) {
+      return res.status(400).json({ error: "La decisión debe ser approved o rejected." });
+    }
+    if (decision === "rejected" && !comment) {
+      return res.status(400).json({ error: "El comentario es obligatorio al rechazar un waiver." });
+    }
+    if (comment.length > 1000) {
+      return res.status(400).json({ error: "El comentario no puede exceder 1000 caracteres." });
+    }
+
+    const waiver = await Waiver.findOne({ _id: req.params.id, status: "signed" });
+    if (!waiver) {
+      return res.status(404).json({ error: "Waiver no encontrado o revocado." });
+    }
+
+    waiver.review = {
+      decision,
+      comment,
+      reviewedBy: req.user._id,
+      reviewedAt: new Date()
+    };
+    await waiver.save();
+    await WaiverAuditEvent.create({
+      waiverId: waiver._id,
+      userId: req.user._id,
+      action: decision,
+      comment
+    });
+
+    return res.json({
+      ok: true,
+      waiver: {
+        id: waiverDisplayId(waiver),
+        decision: waiver.review.decision,
+        comment: waiver.review.comment,
+        reviewedBy: waiver.review.reviewedBy,
+        reviewedAt: waiver.review.reviewedAt
+      }
+    });
+  });
 
   router.get("/validate/:token", async (req, res) => {
     try {
@@ -76,15 +122,24 @@ export function reportRoutes({ jwtSecret }) {
         });
       }
 
+      await WaiverAuditEvent.create({
+        waiverId: consumed._id,
+        userId: req.user._id,
+        action: "qr_validated",
+        metadata: { source: "staff_validation" }
+      });
+
       return res.json({
         valid: true,
         waiver: {
+          databaseId: consumed._id,
           id: waiverDisplayId(consumed),
           attractionName: consumed.attractionName,
           fullName: consumed.participant.fullName,
           birthDate: consumed.participant.birthDate,
           signedAt: consumed.createdAt,
-          status: consumed.status
+          status: consumed.status,
+          review: consumed.review || null
         }
       });
     } catch (_error) {

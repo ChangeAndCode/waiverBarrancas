@@ -50,6 +50,8 @@
 
   let staffScanPaste = "";
   let staffScanResult = null;
+  let staffReviewComment = "";
+  let staffReviewBusy = false;
   let staffScanBusy = false;
   let staffScanError = "";
   let staffScanRunning = false;
@@ -63,6 +65,7 @@
   let adminUsers = [];
   let report = { summary: null, byAttraction: [], waivers: [] };
   let adminReport = { items: [], total: 0, page: 1, pageSize: 25, summary: null };
+  let adminHistory = null;
   let adminReportFilters = { attractionId: "", from: "", to: "", status: "", q: "" };
   let adminAttractionEditId = "";
   let editWaiverText = "";
@@ -929,12 +932,40 @@ async function handleCancelledPayment() {
     staffScanError = "";
     try {
       staffScanResult = await api(`/reports/validate/${encodeURIComponent(token)}`);
+      staffReviewComment = "";
       await loadReport();
     } catch (e) {
       staffScanResult = null;
       staffScanError = e.message;
     } finally {
       staffScanBusy = false;
+    }
+  }
+
+  async function reviewStaffWaiver(decision) {
+    const databaseId = staffScanResult?.waiver?.databaseId;
+    const comment = staffReviewComment.trim();
+    if (!databaseId) return;
+    if (decision === "rejected" && !comment) {
+      staffScanError = "Escribe un comentario para rechazar el waiver.";
+      return;
+    }
+    staffReviewBusy = true;
+    staffScanError = "";
+    try {
+      const result = await api(`/reports/waivers/${databaseId}/review`, "POST", {
+        decision,
+        comment
+      });
+      staffScanResult = {
+        ...staffScanResult,
+        waiver: { ...staffScanResult.waiver, review: result.waiver }
+      };
+      await loadReport();
+    } catch (e) {
+      staffScanError = e.message;
+    } finally {
+      staffReviewBusy = false;
     }
   }
 
@@ -1087,6 +1118,17 @@ async function handleCancelledPayment() {
     }
   }
 
+  async function loadAdminHistory(databaseId) {
+    adminHistory = { loading: true, data: null };
+    try {
+      const data = await api(`/admin/waivers/${databaseId}/history`);
+      adminHistory = { loading: false, data };
+    } catch (e) {
+      message = e.message;
+      adminHistory = { loading: false, data: null };
+    }
+  }
+
   function applyAdminReportFilters() {
     adminReport = { ...adminReport, page: 1 };
     loadAdminReport();
@@ -1224,10 +1266,12 @@ async function handleCancelledPayment() {
     if (path.startsWith("/check/")) return loadCheck();
     if (path === "/staff") {
       if (!authToken) return goTo("/admin?next=/staff");
+      if (!authUser || !["staff", "admin"].includes(authUser.role)) return goTo("/");
       return loadReport();
     }
     if (path === "/admin") {
-      if (!authToken || authUser?.role !== "admin") return;
+      if (!authToken) return;
+      if (authUser?.role !== "admin") return goTo("/staff");
       return loadAdminData();
     }
     if (path === "/success") {
@@ -1253,10 +1297,10 @@ async function handleCancelledPayment() {
       <h1>{isPublicWaiverUi ? L.siteTitle : "Waiver Digital - Parque Temático"}</h1>
     </div>
     <nav>
-      {#if path === "/admin"}
+      {#if path === "/admin" && authUser?.role === "admin"}
         <span class="admin-pill">Modo Admin</span>
-      {:else}
-        <button on:click={() => goTo("/admin")}>{isPublicWaiverUi ? L.admin : "Admin"}</button>
+      {:else if !authToken || authUser?.role === "admin"}
+        <button on:click={() => goTo("/admin")}>{isPublicWaiverUi ? L.admin : "Iniciar Sesión"}</button>
       {/if}
       {#if authToken}
         <button on:click={logout}>{isPublicWaiverUi ? L.logout : "Salir"}</button>
@@ -1356,6 +1400,19 @@ async function handleCancelledPayment() {
           <p><b>Nombre:</b> {staffScanResult.waiver.fullName}</p>
           <p><b>Atracción:</b> {staffScanResult.waiver.attractionName}</p>
           <p><b>Folio:</b> {staffScanResult.waiver.id}</p>
+          {#if staffScanResult.waiver.review?.decision}
+            <p><b>Decisión:</b> {staffScanResult.waiver.review.decision === "approved" ? "Aprobado" : "Rechazado"}</p>
+            {#if staffScanResult.waiver.review.comment}
+              <p><b>Comentario:</b> {staffScanResult.waiver.review.comment}</p>
+            {/if}
+          {:else}
+            <label class="field-label" for="staffReviewComment">Comentario de revisión</label>
+            <textarea id="staffReviewComment" bind:value={staffReviewComment} rows="3" maxlength="1000" placeholder="Comentario opcional para aprobar u obligatorio para rechazar"></textarea>
+            <div class="inline-actions">
+              <button type="button" on:click={() => reviewStaffWaiver("approved")} disabled={staffReviewBusy}>Aprobar waiver</button>
+              <button type="button" class="secondary" on:click={() => reviewStaffWaiver("rejected")} disabled={staffReviewBusy}>Rechazar waiver</button>
+            </div>
+          {/if}
         </div>
       {:else if staffScanResult?.reason === "qr_expired"}
         <div class="staff-scan-result">
@@ -1554,6 +1611,7 @@ async function handleCancelledPayment() {
                   <th>Estado</th>
                   <th>QR validado (staff)</th>
                   <th>Fecha registro</th>
+                  <th>Historial</th>
                 </tr>
               </thead>
               <tbody>
@@ -1568,11 +1626,33 @@ async function handleCancelledPayment() {
                     <td>{row.status}</td>
                     <td>{row.qrConsumedAt ? new Date(row.qrConsumedAt).toLocaleString("es-MX") : "—"}</td>
                     <td>{new Date(row.createdAt).toLocaleString()}</td>
+                    <td><button type="button" on:click={() => loadAdminHistory(row.databaseId)} disabled={loading}>Ver historial</button></td>
                   </tr>
                 {/each}
               </tbody>
             </table>
           </div>
+          {#if adminHistory?.loading}
+            <p>Cargando historial...</p>
+          {:else if adminHistory?.data}
+            <div class="item">
+              <div class="inline-actions">
+                <h3>Historial de {adminHistory.data.folio}</h3>
+                <button type="button" class="secondary" on:click={() => (adminHistory = null)}>Cerrar</button>
+              </div>
+              {#if adminHistory.data.events.length === 0}
+                <p>No hay eventos registrados para este waiver.</p>
+              {:else}
+                {#each adminHistory.data.events as event}
+                  <p>
+                    <b>{event.action}</b> — {new Date(event.createdAt).toLocaleString("es-MX")}
+                    {#if event.userId} — {event.userId.name} ({event.userId.role}){/if}
+                    {#if event.comment}<br />Comentario: {event.comment}{/if}
+                  </p>
+                {/each}
+              {/if}
+            </div>
+          {/if}
           {#if adminReport.items.length === 0 && !loading}
             <p>No hay registros con estos filtros.</p>
           {/if}
