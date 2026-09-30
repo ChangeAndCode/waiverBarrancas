@@ -85,6 +85,7 @@
   let staffReviewComment = "";
   let staffSchedule = { date: "", group: "", time: "", attractionId: "" };
   let staffScheduleBusy = false;
+  let staffTicketBusy = false;
   let staffReviewBusy = false;
   let staffScanBusy = false;
   let staffScanError = "";
@@ -100,6 +101,7 @@
   let report = { summary: null, byAttraction: [], waivers: [] };
   let adminReport = { items: [], total: 0, page: 1, pageSize: 25, summary: null };
   let adminHistory = null;
+  let adminRecord = null;
   let adminStatusDrafts = {};
   let adminStatusComments = {};
   let adminStatusEditRow = null;
@@ -1028,6 +1030,36 @@ async function handleCancelledPayment() {
     }
   }
 
+  async function printStaffTicket() {
+    const databaseId = staffScanResult?.waiver?.databaseId;
+    const qrToken = staffQrToken || extractWaiverTokenFromText(staffScanPaste);
+    if (!databaseId || !qrToken) {
+      staffScanError = "Valida el QR antes de imprimir el ticket.";
+      return;
+    }
+    staffTicketBusy = true;
+    staffScanError = "";
+    try {
+      const result = await api(`/reports/waivers/${databaseId}/ticket`, "POST", { qrToken });
+      const ticket = result.ticket;
+      const qrDataUrl = await QRCode.toDataURL(`${window.location.origin}/check/${ticket.qrToken}`);
+      const printWindow = window.open("", "_blank", "width=600,height=800");
+      if (!printWindow) throw new Error("El navegador bloqueó la ventana de impresión.");
+      printWindow.document.write(`
+        <!doctype html><html><head><title>Ticket ${ticket.id}</title>
+        <style>body{font-family:Arial,sans-serif;text-align:center;padding:24px;color:#173f35}img.logo{width:90px}img.qr{width:220px}h1{font-size:22px}.ticket{border:2px solid #173f35;border-radius:12px;padding:20px;max-width:360px;margin:auto}.row{text-align:left;margin:10px 0}.label{font-weight:700}</style>
+        </head><body><div class="ticket"><img class="logo" src="/logobarrancas.png" alt="Parque Barrancas"><h1>Ticket de acceso</h1>
+        <div class="row"><span class="label">Folio:</span> ${ticket.id}</div><div class="row"><span class="label">Nombre:</span> ${ticket.fullName}</div><div class="row"><span class="label">Atracción:</span> ${ticket.attractionName}</div><div class="row"><span class="label">Fecha:</span> ${ticket.date}</div><div class="row"><span class="label">Horario:</span> ${ticket.time}</div><div class="row"><span class="label">Grupo:</span> ${ticket.group}</div><div class="row"><span class="label">Procedencia:</span> ${ticket.cityState}</div><img class="qr" src="${qrDataUrl}" alt="Código QR"></div></body></html>`);
+      printWindow.document.close();
+      printWindow.focus();
+      printWindow.print();
+    } catch (e) {
+      staffScanError = e.message;
+    } finally {
+      staffTicketBusy = false;
+    }
+  }
+
   async function startStaffScan() {
     staffScanError = "";
     stopStaffScan();
@@ -1185,6 +1217,17 @@ async function handleCancelledPayment() {
     } catch (e) {
       message = e.message;
       adminHistory = { loading: false, data: null };
+    }
+  }
+
+  async function loadAdminRecord(databaseId) {
+    adminRecord = { loading: true, data: null };
+    try {
+      const data = await api(`/admin/waivers/${databaseId}/record`);
+      adminRecord = { loading: false, data };
+    } catch (e) {
+      message = e.message;
+      adminRecord = { loading: false, data: null };
     }
   }
 
@@ -1516,6 +1559,9 @@ async function handleCancelledPayment() {
             </button>
             {#if staffScanResult.waiver.schedule?.date}
               <p class="ok"><b>Horario asignado:</b> {staffScanResult.waiver.schedule.date} · {staffScanResult.waiver.schedule.time} · {staffScanResult.waiver.schedule.group}</p>
+              <button type="button" on:click={printStaffTicket} disabled={staffTicketBusy || staffScanResult.waiver.status !== "approved"}>
+                {staffTicketBusy ? "Preparando ticket..." : "Imprimir ticket con QR"}
+              </button>
             {/if}
           </div>
           {#if staffScanResult.waiver.review?.decision}
@@ -1725,6 +1771,7 @@ async function handleCancelledPayment() {
                   <th>Estado</th>
                   <th>QR validado (staff)</th>
                   <th>Fecha registro</th>
+                  <th>Expediente</th>
                   <th>Historial</th>
                   <th>Actualizar estado</th>
                 </tr>
@@ -1741,6 +1788,21 @@ async function handleCancelledPayment() {
                     <td>{row.status}</td>
                     <td>{row.qrConsumedAt ? new Date(row.qrConsumedAt).toLocaleString("es-MX") : "—"}</td>
                     <td>{new Date(row.createdAt).toLocaleString()}</td>
+                    <td>
+                      <button
+                        type="button"
+                        class="icon-button history-icon-button"
+                        title="Ver expediente"
+                        aria-label={`Ver expediente de ${row.id}`}
+                        on:click={() => loadAdminRecord(row.databaseId)}
+                        disabled={loading}
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                          <path d="M3.5 6.5h6l1.8 2h9.2v9.8a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2v-9.8a2 2 0 0 1 2-2Z"></path>
+                          <path d="M2.5 9h18"></path>
+                        </svg>
+                      </button>
+                    </td>
                     <td>
                       <button
                         type="button"
@@ -1814,7 +1876,23 @@ async function handleCancelledPayment() {
               </div>
             </div>
           {/if}
-          {#if adminHistory?.loading}
+          {#if adminRecord?.data}
+            <div class="history-modal-backdrop">
+              <div class="history-modal" role="dialog" aria-modal="true">
+                <div class="history-modal-header">
+                  <h3>Expediente de {adminRecord.data.visitor.fullName}</h3>
+                  <button type="button" class="secondary history-modal-close" on:click={() => (adminRecord = null)}>×</button>
+                </div>
+                <p><b>Correo:</b> {adminRecord.data.visitor.email}</p>
+                <p><b>Teléfono:</b> {adminRecord.data.visitor.phone}</p>
+                <p><b>Procedencia:</b> {adminRecord.data.visitor.cityState}</p>
+                <h4>Historial de waivers</h4>
+                {#each adminRecord.data.visits as visit}
+                  <div class="history-event"><b>{visit.folio}</b> · {visit.attractionName} · {visit.status} · {new Date(visit.createdAt).toLocaleString("es-MX")}</div>
+                {/each}
+              </div>
+            </div>
+          {:else if adminHistory?.loading}
             <div class="history-modal-backdrop">
               <div class="history-modal" role="dialog" aria-modal="true" aria-label="Cargando historial">
                 <p>Cargando historial...</p>
@@ -2610,11 +2688,25 @@ async function handleCancelledPayment() {
     color: #1f4a3b;
     font-weight: 700;
   }
+  .report-table th:nth-last-child(3),
+  .report-table td:nth-last-child(3) {
+    position: sticky;
+    right: 174px;
+    z-index: 2;
+    width: 82px;
+    min-width: 82px;
+    background: #fff;
+    box-shadow: -5px 0 8px rgba(31, 74, 59, 0.08);
+  }
+  .report-table th:nth-last-child(3) {
+    background: #f0e6d4;
+    z-index: 4;
+  }
   .report-table th:nth-last-child(2),
   .report-table td:nth-last-child(2) {
     position: sticky;
     right: 92px;
-    z-index: 2;
+    z-index: 3;
     width: 82px;
     min-width: 82px;
     background: #fff;
@@ -2622,13 +2714,13 @@ async function handleCancelledPayment() {
   }
   .report-table th:nth-last-child(2) {
     background: #f0e6d4;
-    z-index: 4;
+    z-index: 5;
   }
   .report-table th:last-child,
   .report-table td:last-child {
     position: sticky;
     right: 0;
-    z-index: 3;
+    z-index: 4;
     width: 92px;
     min-width: 92px;
     background: #fff;
@@ -2636,7 +2728,7 @@ async function handleCancelledPayment() {
   }
   .report-table th:last-child {
     background: #f0e6d4;
-    z-index: 5;
+    z-index: 6;
   }
   .pager {
     width: 100%;

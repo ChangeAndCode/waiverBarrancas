@@ -209,6 +209,32 @@ export function adminRoutes({ jwtSecret }) {
     });
   });
 
+  router.get("/waivers/:id/record", async (req, res) => {
+    const current = await Waiver.findById(req.params.id).lean();
+    if (!current) return res.status(404).json({ error: "Waiver no encontrado." });
+
+    const email = String(current.participant?.email || "").trim().toLowerCase();
+    const phone = String(current.participant?.phone || "").trim();
+    const identityQuery = [];
+    if (email) identityQuery.push({ "participant.email": email });
+    if (phone) identityQuery.push({ "participant.phone": phone });
+    const visits = await Waiver.find(identityQuery.length ? { $or: identityQuery } : { _id: current._id })
+      .select("_id folio attractionName status createdAt schedule review")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return res.json({
+      visitor: {
+        fullName: current.participant?.fullName || "",
+        email: current.participant?.email || "",
+        phone: current.participant?.phone || "",
+        cityState: current.participant?.cityState || ""
+      },
+      currentWaiverId: current._id,
+      visits
+    });
+  });
+
   router.get("/reports/waivers", async (req, res) => {
     const filter = waiverAdminReportFilter(req);
     const page = Math.max(1, parseInt(String(req.query.page || "1"), 10) || 1);

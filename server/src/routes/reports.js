@@ -151,6 +151,58 @@ export function reportRoutes({ jwtSecret }) {
     }
   );
 
+  router.post(
+    "/waivers/:id/ticket",
+    requirePermissions("waiver.ticket.print"),
+    async (req, res) => {
+      const qrToken = String(req.body?.qrToken || "").trim();
+      if (!qrToken) return res.status(400).json({ error: "El QR es obligatorio." });
+
+      let payload;
+      try {
+        payload = verifyWaiverToken(qrToken, jwtSecret);
+      } catch (_error) {
+        return res.status(400).json({ error: "QR inválido." });
+      }
+      if (String(payload.waiverId) !== String(req.params.id)) {
+        return res.status(403).json({ error: "El QR no corresponde al waiver." });
+      }
+
+      const waiver = await Waiver.findById(req.params.id).lean();
+      if (!waiver || ["revoked", "rejected"].includes(waiver.status)) {
+        return res.status(404).json({ error: "Waiver no encontrado o no disponible." });
+      }
+      if (waiver.status !== "approved") {
+        return res.status(409).json({ error: "El waiver debe estar aprobado para imprimir el ticket." });
+      }
+      if (!waiver.schedule?.date || !waiver.schedule?.time || !waiver.schedule?.group) {
+        return res.status(409).json({ error: "Primero asigna un horario al waiver." });
+      }
+
+      await WaiverAuditEvent.create({
+        waiverId: waiver._id,
+        userId: req.user._id,
+        userRole: req.user.role,
+        action: "ticket_printed",
+        metadata: { source: "staff_ticket", folio: waiverDisplayId(waiver) }
+      });
+
+      return res.json({
+        ok: true,
+        ticket: {
+          id: waiverDisplayId(waiver),
+          fullName: waiver.participant.fullName,
+          attractionName: waiver.schedule.attractionName || waiver.attractionName,
+          date: waiver.schedule.date,
+          time: waiver.schedule.time,
+          group: waiver.schedule.group,
+          cityState: waiver.participant.cityState || "",
+          qrToken
+        }
+      });
+    }
+  );
+
   router.get("/validate/:token", requirePermissions("waiver.scan"), async (req, res) => {
     try {
       const payload = verifyWaiverToken(req.params.token, jwtSecret);
