@@ -81,17 +81,36 @@ export function testApp(mock) {
   mock.method(Waiver, "create", async (data) => {
     const doc = new Waiver(data);
     await doc.validate();
-    const w = { ...doc.toObject(), _id: String(doc._id), createdAt: new Date(), updatedAt: new Date() };
+    // Preserve ObjectId values as strings when cloning records in memory.
+    const w = { ...JSON.parse(JSON.stringify(doc.toObject())), _id: String(doc._id), createdAt: new Date(), updatedAt: new Date() };
     records.set(w._id, w);
     return w;
   });
-  mock.method(Waiver, "findById", (id) => ({ lean: async () => structuredClone(records.get(String(id)) || null) }));
+  const singleQuery = (lookup) => ({
+    lean: async () => structuredClone(lookup() || null),
+    then(resolve, reject) {
+      const record = lookup();
+      const document = record ? { ...structuredClone(record), async save() {
+        const { save, ...data } = this;
+        Object.assign(record, data);
+      } } : null;
+      return Promise.resolve(document).then(resolve, reject);
+    }
+  });
+  mock.method(Waiver, "findById", (id) => singleQuery(() => records.get(String(id))));
+  mock.method(Waiver, "findOne", (filter) => singleQuery(() => [...records.values()].find((w) => matches(w, filter))));
   mock.method(Waiver, "find", (filter = {}) => query([...records.values()].filter((w) => matches(w, filter))));
   mock.method(Waiver, "countDocuments", async (filter = {}) => [...records.values()].filter((w) => matches(w, filter)).length);
   mock.method(Waiver, "findOneAndUpdate", (filter, update) => ({ lean: async () => {
     const w = [...records.values()].find((w) => matches(w, filter));
     if (!w) return null;
-    Object.assign(w, update.$set);
+    for (const [path, value] of Object.entries(update.$set)) {
+      const parts = path.split(".");
+      const key = parts.pop();
+      let target = w;
+      for (const part of parts) target = target[part] ??= {};
+      target[key] = value;
+    }
     return structuredClone(w);
   } }));
   mock.method(WaiverAuditEvent, "create", async (data) => ({

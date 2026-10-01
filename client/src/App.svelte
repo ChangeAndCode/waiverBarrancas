@@ -983,7 +983,12 @@ async function handleCancelledPayment() {
       staffScanResult = await api(`/reports/validate/${encodeURIComponent(token)}`);
       stopStaffScan();
       staffReviewComment = "";
-      staffSchedule = { date: "", group: "", time: "", attractionId: staffScanResult?.waiver?.attractionId || "" };
+      staffSchedule = {
+        date: staffScanResult?.waiver?.schedule?.date || staffScanResult?.waiver?.visitDate || "",
+        group: staffScanResult?.waiver?.schedule?.group || "",
+        time: staffScanResult?.waiver?.schedule?.time || "",
+        attractionId: staffScanResult?.waiver?.attractionId || ""
+      };
     } catch (e) {
       staffScanResult = null;
       staffScanError = e.message;
@@ -1036,6 +1041,7 @@ async function reviewStaffWaiver(decision) {
       ...staffScanResult,
       waiver: {
         ...staffScanResult.waiver,
+        status: result.waiver.status,
         review: result.waiver
       }
     };
@@ -1046,6 +1052,21 @@ async function reviewStaffWaiver(decision) {
     staffReviewBusy = false;
   }
 }
+
+  async function validateStaffVisit() {
+    if (!staffQrToken || staffReviewBusy) return;
+    staffReviewBusy = true;
+    staffScanError = "";
+    try {
+      staffScanResult = await api(`/reports/validate/${encodeURIComponent(staffQrToken)}`, "POST", {
+        assignedTime: staffSchedule.time
+      });
+    } catch (e) {
+      staffScanError = e.message;
+    } finally {
+      staffReviewBusy = false;
+    }
+  }
 
   async function assignStaffSchedule() {
     const databaseId = staffScanResult?.waiver?.databaseId;
@@ -1621,7 +1642,18 @@ async function reviewStaffWaiver(decision) {
              <p><b>Condición médica:</b> {staffScanResult.waiver.answers?.hasMedicalCondition ? "Sí" : "No"}</p>
              <p><b>Firma registrada:</b> {staffScanResult.waiver.hasSignature ? "Sí" : "No"}</p>
              <p><b>Firma de testigo:</b> {staffScanResult.waiver.witness?.hasSignature ? "Sí" : "No"}</p>
-           </details>
+          </details>
+          {#if staffScanResult.waiver.visitDate}
+            <p><b>Día de visita:</b> {staffScanResult.waiver.visitDate}</p>
+            <p><b>Horario general (Chihuahua):</b> {parkDateTimeLabel(staffScanResult.waiver.assignedAt)}</p>
+            {#if staffScanResult.waiver.status === "pending" || staffScanResult.waiver.status === "signed"}
+              <label class="field-label" for="staffVisitTime">Horario general de la visita</label>
+              <input id="staffVisitTime" type="time" bind:value={staffSchedule.time} />
+              <button type="button" on:click={validateStaffVisit} disabled={staffReviewBusy || !staffSchedule.time}>
+                {staffReviewBusy ? "Validando..." : "Validar carta y asignar horario general"}
+              </button>
+            {/if}
+          {/if}
           <div class="schedule-box">
             <h4>Asignar horario</h4>
             <label class="field-label" for="staffScheduleDate">Fecha</label>
@@ -1649,7 +1681,9 @@ async function reviewStaffWaiver(decision) {
             <label class="field-label" for="staffReviewComment">Comentario de revisión</label>
             <textarea id="staffReviewComment" bind:value={staffReviewComment} rows="3" maxlength="1000" placeholder="Comentario opcional para aprobar u obligatorio para rechazar"></textarea>
             <div class="inline-actions">
-              <button type="button" on:click={() => reviewStaffWaiver("approved")} disabled={staffReviewBusy}>Aprobar waiver</button>
+              {#if !staffScanResult.waiver.visitDate}
+                <button type="button" on:click={() => reviewStaffWaiver("approved")} disabled={staffReviewBusy}>Aprobar waiver</button>
+              {/if}
               <button type="button" class="secondary" on:click={() => reviewStaffWaiver("rejected")} disabled={staffReviewBusy}>Rechazar waiver</button>
             </div>
           {/if}
