@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import { Attraction } from "../models/Attraction.js";
 import { Waiver } from "../models/Waiver.js";
 import { User } from "../models/User.js";
-import { requireAuth, requireRoles } from "../lib/auth.js";
+import { requireAuth, requirePermissions, requireRoles } from "../lib/auth.js";
 import { nowMs, perfLog } from "../lib/perf.js";
 import { waiverDisplayId } from "../lib/folio.js";
 import { WaiverAuditEvent } from "../models/WaiverAuditEvent.js";
@@ -17,7 +17,7 @@ function escapeRegex(s) {
 }
 
 function waiverAdminReportFilter(req) {
-  const query = {};
+  const query = { deletedAt: null };
   if (req.query.attractionId) query.attractionId = req.query.attractionId;
   const st = String(req.query.status || "").trim();
   if (["pending", "approved", "rejected", "revoked"].includes(st)) {
@@ -87,7 +87,7 @@ function mapWaiverRow(w) {
 export function adminRoutes({ jwtSecret }) {
   const router = Router();
 
-  router.use(requireAuth(jwtSecret), requireRoles("admin"));
+  router.use(requireAuth(jwtSecret), requireRoles("admin"), requirePermissions("admin.panel"));
 
   router.get("/attractions", async (_req, res) => {
     const items = await Attraction.find().sort({ createdAt: -1 }).lean();
@@ -132,7 +132,7 @@ export function adminRoutes({ jwtSecret }) {
   });
 
   router.get("/waivers", async (req, res) => {
-    const query = {};
+    const query = { deletedAt: null };
     if (req.query.attractionId) query.attractionId = req.query.attractionId;
     const waivers = await Waiver.find(query).sort({ createdAt: -1 }).limit(200).lean();
     res.json(waivers);
@@ -153,6 +153,25 @@ export function adminRoutes({ jwtSecret }) {
       comment: String(req.body?.comment || "").trim()
     });
     res.json(updated);
+  });
+
+  router.delete("/waivers/:id", async (req, res) => {
+    const comment = String(req.body?.comment || "").trim();
+    const waiver = await Waiver.findOne({ _id: req.params.id, deletedAt: null });
+    if (!waiver) return res.status(404).json({ error: "Waiver no encontrado." });
+
+    waiver.deletedAt = new Date();
+    waiver.deletedBy = req.user._id;
+    await waiver.save();
+    await WaiverAuditEvent.create({
+      waiverId: waiver._id,
+      userId: req.user._id,
+      userRole: req.user.role,
+      action: "waiver_deleted",
+      comment,
+      metadata: { source: "admin_delete", logical: true }
+    });
+    return res.json({ ok: true, waiver: { id: waiverDisplayId(waiver), deletedAt: waiver.deletedAt } });
   });
 
   router.patch("/waivers/:id/status", async (req, res) => {
@@ -210,6 +229,32 @@ export function adminRoutes({ jwtSecret }) {
       waiverId: waiver._id,
       folio: waiver.folio,
       events
+    });
+  });
+
+  router.get("/waivers/:id/record", async (req, res) => {
+    const current = await Waiver.findById(req.params.id).lean();
+    if (!current) return res.status(404).json({ error: "Waiver no encontrado." });
+
+    const email = String(current.participant?.email || "").trim().toLowerCase();
+    const phone = String(current.participant?.phone || "").trim();
+    const identityQuery = [];
+    if (email) identityQuery.push({ "participant.email": email });
+    if (phone) identityQuery.push({ "participant.phone": phone });
+    const visits = await Waiver.find(identityQuery.length ? { $or: identityQuery } : { _id: current._id })
+      .select("_id folio attractionName status createdAt schedule review")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return res.json({
+      visitor: {
+        fullName: current.participant?.fullName || "",
+        email: current.participant?.email || "",
+        phone: current.participant?.phone || "",
+        cityState: current.participant?.cityState || ""
+      },
+      currentWaiverId: current._id,
+      visits
     });
   });
 

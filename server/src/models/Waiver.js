@@ -62,12 +62,22 @@ const waiverSchema = new mongoose.Schema(
     },
 
     qrConsumedAt: { type: Date, default: null },
-
-  status: {
-    type: String,
-    enum: ["pending", "approved", "rejected", "revoked"],
-    default: "pending"
-  }
+    deletedAt: { type: Date, default: null },
+    deletedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    schedule: {
+      date: { type: String, trim: true, default: "" },
+      group: { type: String, trim: true, default: "" },
+      attractionId: { type: mongoose.Schema.Types.ObjectId, ref: "Attraction", default: null },
+      attractionName: { type: String, trim: true, default: "" },
+      time: { type: String, trim: true, default: "" },
+      assignedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+      assignedAt: { type: Date, default: null }
+    },
+    status: {
+      type: String,
+      enum: ["pending", "approved", "rejected", "revoked"],
+      default: "pending"
+    }
   },
   { timestamps: true }
 );

@@ -347,12 +347,11 @@ await WaiverAuditEvent.create({
     });
   });
 
-router.get("/check/:token", async (req, res) => {
-  const { token } = req.params;
-
-  try {
-    const payload = verifyWaiverToken(token, jwtSecret);
-    const waiver = await Waiver.findById(payload.waiverId).lean();
+  router.get("/check/:token", async (req, res) => {
+    const { token } = req.params;
+    try {
+      const payload = verifyWaiverToken(token, jwtSecret);
+      const waiver = await Waiver.findOne({ _id: payload.waiverId, deletedAt: null }).lean();
 
     // No existe o fue revocado.
     if (!waiver || waiver.status === "revoked") {

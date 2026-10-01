@@ -45,6 +45,37 @@
   let authToken = localStorage.getItem("authToken") || "";
   let authUser = JSON.parse(localStorage.getItem("authUser") || "null");
 
+  const ROLE_PERMISSIONS = {
+    staff: [
+      "auth.login",
+      "waiver.scan",
+      "waiver.read.scanned",
+      "waiver.review",
+      "waiver.comment",
+      "waiver.schedule.assign",
+      "waiver.ticket.print"
+    ],
+    admin: [
+      "auth.login",
+      "waiver.scan",
+      "waiver.read.scanned",
+      "waiver.review",
+      "waiver.comment",
+      "waiver.schedule.assign",
+      "waiver.ticket.print",
+      "waiver.history.read",
+      "waiver.export",
+      "waiver.delete",
+      "users.manage",
+      "settings.manage",
+      "admin.panel"
+    ]
+  };
+
+  function hasPermission(permission) {
+    return Boolean(authUser?.role && ROLE_PERMISSIONS[authUser.role]?.includes(permission));
+  }
+
   let attractions = [];
   let selectedParkAttractions = {};
   let waiverResult = null;
@@ -53,9 +84,11 @@
 
   let staffScanPaste = "";
   let staffQrToken = "";
-  let assignedTime = "";
   let staffScanResult = null;
   let staffReviewComment = "";
+  let staffSchedule = { date: "", group: "", time: "", attractionId: "" };
+  let staffScheduleBusy = false;
+  let staffTicketBusy = false;
   let staffReviewBusy = false;
   let staffScanBusy = false;
   let staffScanError = "";
@@ -71,9 +104,13 @@
   let report = { summary: null, byAttraction: [], waivers: [] };
   let adminReport = { items: [], total: 0, page: 1, pageSize: 25, summary: null };
   let adminHistory = null;
+  let adminRecord = null;
   let adminStatusDrafts = {};
   let adminStatusComments = {};
   let adminStatusEditRow = null;
+  let adminDeleteRow = null;
+  let adminDeleteSuccess = "";
+  let adminDeleteBusy = false;
   let adminReportFilters = { attractionId: "", from: "", to: "", status: "", q: "" };
   let adminAttractionEditId = "";
   let editWaiverText = "";
@@ -940,14 +977,13 @@ async function handleCancelledPayment() {
       return;
     }
     staffScanBusy = true;
+    staffQrToken = token;
     staffScanError = "";
     try {
-      staffQrToken = token;
-      assignedTime = "";
       staffScanResult = await api(`/reports/validate/${encodeURIComponent(token)}`);
-    stopStaffScan();
+      stopStaffScan();
       staffReviewComment = "";
-    await loadReport();
+      staffSchedule = { date: "", group: "", time: "", attractionId: staffScanResult?.waiver?.attractionId || "" };
     } catch (e) {
       staffScanResult = null;
       staffScanError = e.message;
@@ -970,27 +1006,6 @@ function parkDateTimeLabel(value) {
   return value
     ? new Date(value).toLocaleString("es-MX", { timeZone: PARK_TIME_ZONE })
     : "Por asignar";
-}
-
-async function validateStaffVisit() {
-  if (staffScanBusy || !staffQrToken || !assignedTime) return;
-
-  staffScanBusy = true;
-  staffScanError = "";
-
-  try {
-    staffScanResult = await api(
-      `/reports/validate/${encodeURIComponent(staffQrToken)}`,
-      "POST",
-      { assignedTime }
-    );
-
-    await loadReport();
-  } catch (error) {
-    staffScanError = error.message;
-  } finally {
-    staffScanBusy = false;
-  }
 }
 
 async function reviewStaffWaiver(decision) {
@@ -1025,13 +1040,64 @@ async function reviewStaffWaiver(decision) {
       }
     };
 
-    await loadReport();
   } catch (e) {
     staffScanError = e.message;
   } finally {
     staffReviewBusy = false;
   }
 }
+
+  async function assignStaffSchedule() {
+    const databaseId = staffScanResult?.waiver?.databaseId;
+    const qrToken = staffQrToken || extractWaiverTokenFromText(staffScanPaste);
+    if (!databaseId || !qrToken) {
+      staffScanError = "Conserva el QR escaneado o pegado para asignar el horario.";
+      return;
+    }
+    staffScheduleBusy = true;
+    staffScanError = "";
+    try {
+      const result = await api(`/reports/waivers/${databaseId}/schedule`, "PATCH", {
+        ...staffSchedule,
+        qrToken
+      });
+      staffScanResult = { ...staffScanResult, waiver: { ...staffScanResult.waiver, schedule: result.waiver.schedule } };
+    } catch (e) {
+      staffScanError = e.message;
+    } finally {
+      staffScheduleBusy = false;
+    }
+  }
+
+  async function printStaffTicket() {
+    const databaseId = staffScanResult?.waiver?.databaseId;
+    const qrToken = staffQrToken || extractWaiverTokenFromText(staffScanPaste);
+    if (!databaseId || !qrToken) {
+      staffScanError = "Valida el QR antes de imprimir el ticket.";
+      return;
+    }
+    staffTicketBusy = true;
+    staffScanError = "";
+    try {
+      const result = await api(`/reports/waivers/${databaseId}/ticket`, "POST", { qrToken });
+      const ticket = result.ticket;
+      const qrDataUrl = await QRCode.toDataURL(`${window.location.origin}/check/${ticket.qrToken}`);
+      const printWindow = window.open("", "_blank", "width=600,height=800");
+      if (!printWindow) throw new Error("El navegador bloqueó la ventana de impresión.");
+      printWindow.document.write(`
+        <!doctype html><html><head><title>Ticket ${ticket.id}</title>
+        <style>body{font-family:Arial,sans-serif;text-align:center;padding:24px;color:#173f35}img.logo{width:90px}img.qr{width:220px}h1{font-size:22px}.ticket{border:2px solid #173f35;border-radius:12px;padding:20px;max-width:360px;margin:auto}.row{text-align:left;margin:10px 0}.label{font-weight:700}</style>
+        </head><body><div class="ticket"><img class="logo" src="/logobarrancas.png" alt="Parque Barrancas"><h1>Ticket de acceso</h1>
+        <div class="row"><span class="label">Folio:</span> ${ticket.id}</div><div class="row"><span class="label">Nombre:</span> ${ticket.fullName}</div><div class="row"><span class="label">Atracción:</span> ${ticket.attractionName}</div><div class="row"><span class="label">Fecha:</span> ${ticket.date}</div><div class="row"><span class="label">Horario:</span> ${ticket.time}</div><div class="row"><span class="label">Grupo:</span> ${ticket.group}</div><div class="row"><span class="label">Procedencia:</span> ${ticket.cityState}</div><img class="qr" src="${qrDataUrl}" alt="Código QR"></div></body></html>`);
+      printWindow.document.close();
+      printWindow.focus();
+      printWindow.print();
+    } catch (e) {
+      staffScanError = e.message;
+    } finally {
+      staffTicketBusy = false;
+    }
+  }
 
   async function startStaffScan() {
     staffScanError = "";
@@ -1197,6 +1263,17 @@ async function reviewStaffWaiver(decision) {
     }
   }
 
+  async function loadAdminRecord(databaseId) {
+    adminRecord = { loading: true, data: null };
+    try {
+      const data = await api(`/admin/waivers/${databaseId}/record`);
+      adminRecord = { loading: false, data };
+    } catch (e) {
+      message = e.message;
+      adminRecord = { loading: false, data: null };
+    }
+  }
+
   function applyAdminReportFilters() {
     adminReport = { ...adminReport, page: 1 };
     loadAdminReport();
@@ -1327,6 +1404,31 @@ async function reviewStaffWaiver(decision) {
     await loadAdminData();
   }
 
+  function openAdminDeleteModal(row) {
+    adminDeleteRow = row;
+    adminDeleteSuccess = "";
+  }
+
+  async function deleteAdminWaiver() {
+    const row = adminDeleteRow;
+    if (!row) return;
+    if (adminDeleteBusy) return;
+    adminDeleteBusy = true;
+    try {
+      await api(`/admin/waivers/${row.databaseId}`, "DELETE", { comment: "Eliminado por Admin." });
+      adminDeleteSuccess = `El waiver ${row.id} fue eliminado con éxito.`;
+      setTimeout(async () => {
+        adminDeleteRow = null;
+        adminDeleteSuccess = "";
+        adminDeleteBusy = false;
+        await loadAdminReport();
+      }, 3000);
+    } catch (e) {
+      message = e.message;
+      adminDeleteBusy = false;
+    }
+  }
+
   async function bootstrap() {
     message = "";
     document.documentElement.lang = locale === "en" ? "en" : "es";
@@ -1334,12 +1436,12 @@ async function reviewStaffWaiver(decision) {
     if (path.startsWith("/check/")) return loadCheck();
     if (path === "/staff") {
       if (!authToken) return goTo("/admin?next=/staff");
-      if (!authUser || !["staff", "admin"].includes(authUser.role)) return goTo("/");
-      return loadReport();
+      if (!hasPermission("waiver.scan")) return goTo("/");
+      return;
     }
     if (path === "/admin") {
       if (!authToken) return;
-      if (authUser?.role !== "admin") return goTo("/staff");
+      if (!hasPermission("admin.panel")) return goTo("/staff");
       return loadAdminData();
     }
     if (path === "/success") {
@@ -1506,140 +1608,52 @@ async function reviewStaffWaiver(decision) {
           <p class="ok">{statusLabel(staffScanResult.waiver.status)}</p>
           <p><b>Nombre:</b> {staffScanResult.waiver.fullName}</p>
           <p><b>Atracción:</b> {staffScanResult.waiver.attractionName}</p>
+           <p><b>Correo:</b> {staffScanResult.waiver.participant?.email}</p>
+           <p><b>Teléfono:</b> {staffScanResult.waiver.participant?.phone}</p>
+           <p><b>Estado de procedencia:</b> {staffScanResult.waiver.participant?.cityState}</p>
+           <details>
+             <summary>Ver carta responsiva completa</summary>
+             <div class="waiver-preview">{@html staffScanResult.waiver.waiverTextSnapshot || "Sin texto disponible."}</div>
+             <p><b>Género:</b> {staffScanResult.waiver.participant?.gender}</p>
+             <p><b>Fecha de nacimiento:</b> {staffScanResult.waiver.participant?.birthDate}</p>
+             <p><b>Contacto de emergencia:</b> {staffScanResult.waiver.participant?.emergencyContactName} — {staffScanResult.waiver.participant?.emergencyContactPhone}</p>
+             <p><b>Medicamentos:</b> {staffScanResult.waiver.participant?.medications}</p>
+             <p><b>Condición médica:</b> {staffScanResult.waiver.answers?.hasMedicalCondition ? "Sí" : "No"}</p>
+             <p><b>Firma registrada:</b> {staffScanResult.waiver.hasSignature ? "Sí" : "No"}</p>
+             <p><b>Firma de testigo:</b> {staffScanResult.waiver.witness?.hasSignature ? "Sí" : "No"}</p>
+           </details>
+          <div class="schedule-box">
+            <h4>Asignar horario</h4>
+            <label class="field-label" for="staffScheduleDate">Fecha</label>
+            <input id="staffScheduleDate" type="date" bind:value={staffSchedule.date} />
+            <label class="field-label" for="staffScheduleGroup">Grupo</label>
+            <input id="staffScheduleGroup" bind:value={staffSchedule.group} placeholder="Grupo 1" />
+            <label class="field-label" for="staffScheduleTime">Horario</label>
+            <input id="staffScheduleTime" type="time" bind:value={staffSchedule.time} />
+            <button type="button" on:click={assignStaffSchedule} disabled={staffScheduleBusy}>
+              {staffScheduleBusy ? "Asignando..." : "Asignar horario"}
+            </button>
+            {#if staffScanResult.waiver.schedule?.date}
+              <p class="ok"><b>Horario asignado:</b> {staffScanResult.waiver.schedule.date} · {staffScanResult.waiver.schedule.time} · {staffScanResult.waiver.schedule.group}</p>
+              <button type="button" on:click={printStaffTicket} disabled={staffTicketBusy || staffScanResult.waiver.status !== "approved"}>
+                {staffTicketBusy ? "Preparando ticket..." : "Imprimir ticket con QR"}
+              </button>
+            {/if}
+          </div>
+          {#if staffScanResult.waiver.review?.decision}
+            <p><b>Decisión:</b> {staffScanResult.waiver.review.decision === "approved" ? "Aprobado" : "Rechazado"}</p>
+            {#if staffScanResult.waiver.review.comment}
+              <p><b>Comentario:</b> {staffScanResult.waiver.review.comment}</p>
+            {/if}
+          {:else}
+            <label class="field-label" for="staffReviewComment">Comentario de revisión</label>
+            <textarea id="staffReviewComment" bind:value={staffReviewComment} rows="3" maxlength="1000" placeholder="Comentario opcional para aprobar u obligatorio para rechazar"></textarea>
+            <div class="inline-actions">
+              <button type="button" on:click={() => reviewStaffWaiver("approved")} disabled={staffReviewBusy}>Aprobar waiver</button>
+              <button type="button" class="secondary" on:click={() => reviewStaffWaiver("rejected")} disabled={staffReviewBusy}>Rechazar waiver</button>
+            </div>
+          {/if}
           <p><b>Folio:</b> {staffScanResult.waiver.id}</p>
-{#if staffScanResult.waiver.visitDate}
-  <p><b>Día de visita:</b> {staffScanResult.waiver.visitDate}</p>
-  <p><b>Horario (Chihuahua):</b> {parkDateTimeLabel(staffScanResult.waiver.assignedAt)}</p>
-
-  {#if staffScanResult.waiver.expiresAt}
-    <p>
-      <b>Vence al iniciar:</b>
-      {parkDateTimeLabel(staffScanResult.waiver.expiresAt)} (hora del parque)
-    </p>
-  {/if}
-
-  {#if staffScanResult.review}
-    <details>
-      <summary>Revisar carta y datos del participante</summary>
-
-      <p>
-        <b>Procedencia:</b>
-        {staffScanResult.review.participant.nationality}
-        —
-        {staffScanResult.review.participant.cityState}
-      </p>
-
-      <p><b>Nacimiento:</b> {staffScanResult.waiver.birthDate}</p>
-
-      <p>
-        <b>Medicamentos:</b>
-        {staffScanResult.review.participant.medications}
-      </p>
-
-      <p>
-        <b>Contacto de emergencia:</b>
-        {staffScanResult.review.participant.emergencyContactName}
-        —
-        {staffScanResult.review.participant.emergencyContactPhone}
-      </p>
-
-      <WaiverTextView content={staffScanResult.review.waiverTextSnapshot} />
-
-      <p>Firma del participante</p>
-      <img
-        class="review-signature"
-        src={staffScanResult.review.signatureImage}
-        alt="Firma del participante"
-      />
-
-      <p>Firma del testigo</p>
-      <img
-        class="review-signature"
-        src={staffScanResult.review.witness?.signatureImage}
-        alt="Firma del testigo"
-      />
-
-      {#if staffScanResult.review.isMinor}
-        <p>
-          <b>Tutor:</b>
-          {staffScanResult.review.guardian?.fullName}
-          —
-          {staffScanResult.review.guardian?.relation}
-        </p>
-
-        <img
-          class="review-signature"
-          src={staffScanResult.review.guardian?.signatureImage}
-          alt="Firma del tutor"
-        />
-      {/if}
-    </details>
-  {/if}
-
-  {#if staffScanResult.waiver.status === "pending"}
-    <p>
-      Verifica identidad, carta y disponibilidad antes de aprobar o rechazar la solicitud.
-    </p>
-
-    <label class="field-label" for="assignedTime">
-      Horario general del día de visita (hora de Chihuahua)
-    </label>
-
-    <input
-      id="assignedTime"
-      type="time"
-      bind:value={assignedTime}
-    />
-
-    <label class="field-label" for="staffReviewComment">
-      Comentario de revisión
-    </label>
-
-    <textarea
-      id="staffReviewComment"
-      bind:value={staffReviewComment}
-      rows="3"
-      maxlength="1000"
-      placeholder="Comentario obligatorio para rechazar"
-    ></textarea>
-
-    <div class="inline-actions">
-      <button
-        type="button"
-        on:click={validateStaffVisit}
-        disabled={staffScanBusy || !assignedTime}
-      >
-        Aprobar y asignar horario
-      </button>
-
-      <button
-        type="button"
-        class="secondary"
-        on:click={() => reviewStaffWaiver("rejected")}
-        disabled={staffReviewBusy}
-      >
-        Rechazar waiver
-      </button>
-    </div>
-  {/if}
-
-  {#if staffScanResult.waiver.review?.decision}
-    <p>
-      <b>Decisión:</b>
-      {staffScanResult.waiver.review.decision === "approved"
-        ? "Aprobado"
-        : "Rechazado"}
-    </p>
-
-    {#if staffScanResult.waiver.review.comment}
-      <p>
-        <b>Comentario:</b>
-        {staffScanResult.waiver.review.comment}
-      </p>
-    {/if}
-  {/if}
-{/if}
-      
         </div>
       {:else if staffScanResult?.reason === "qr_expired"}
         <div class="staff-scan-result">
@@ -1658,14 +1672,6 @@ async function reviewStaffWaiver(decision) {
       {/if}
 
       <h3>Últimos registros</h3>
-      {#if report.summary}
-        <p><b>Total:</b> {report.summary.total} | <b>Pendientes:</b> {report.summary.pending} | <b>Aprobados:</b> {report.summary.approved} | <b>Rechazados:</b> {report.summary.rejected} | <b>Revocados:</b> {report.summary.revoked}</p>
-      {/if}
-      {#each report.waivers as item}
-        <div class="item">
-          <p>{item.fullName} - {item.attractionName} - {statusLabel(item.status)} - {item.visitDate || new Date(item.createdAt).toLocaleString()}</p>
-        </div>
-      {/each}
     </section>
   {:else if path === "/admin"}
     <section class="card">
@@ -1842,6 +1848,7 @@ async function reviewStaffWaiver(decision) {
                   <th>Estado</th>
                   <th>QR validado (staff)</th>
                   <th>Fecha registro</th>
+                  <th>Expediente</th>
                   <th>Historial</th>
                   <th>Actualizar estado</th>
                 </tr>
@@ -1858,6 +1865,21 @@ async function reviewStaffWaiver(decision) {
                     <td>{statusLabel(row.status)}{#if row.visitDate}<br />Visita: {row.visitDate}<br />Horario: {parkDateTimeLabel(row.assignedAt)}{/if}</td>
                     <td>{row.qrConsumedAt ? new Date(row.qrConsumedAt).toLocaleString("es-MX") : "—"}</td>
                     <td>{new Date(row.createdAt).toLocaleString()}</td>
+                    <td>
+                      <button
+                        type="button"
+                        class="icon-button history-icon-button"
+                        title="Ver expediente"
+                        aria-label={`Ver expediente de ${row.id}`}
+                        on:click={() => loadAdminRecord(row.databaseId)}
+                        disabled={loading}
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                          <path d="M3.5 6.5h6l1.8 2h9.2v9.8a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2v-9.8a2 2 0 0 1 2-2Z"></path>
+                          <path d="M2.5 9h18"></path>
+                        </svg>
+                      </button>
+                    </td>
                     <td>
                       <button
                         type="button"
@@ -1887,12 +1909,51 @@ async function reviewStaffWaiver(decision) {
                           <path d="m13.8 7.2 3 3"></path>
                         </svg>
                       </button>
+                      <button
+                        type="button"
+                        class="icon-button delete-icon-button"
+                        title="Eliminar waiver"
+                        aria-label={`Eliminar waiver ${row.id}`}
+                        on:click={() => openAdminDeleteModal(row)}
+                        disabled={loading}
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                          <path d="M4 7h16"></path>
+                          <path d="M9 7V4h6v3"></path>
+                          <path d="m7 7 1 13h8l1-13"></path>
+                          <path d="M10 11v5M14 11v5"></path>
+                        </svg>
+                      </button>
                     </td>
                   </tr>
                 {/each}
               </tbody>
             </table>
           </div>
+          {#if adminDeleteRow}
+            <div
+              class="status-modal-backdrop"
+              role="presentation"
+              on:click={(event) => { if (event.target === event.currentTarget) adminDeleteRow = null; }}
+              on:keydown={(event) => { if (event.key === "Escape") adminDeleteRow = null; }}
+            >
+              <div class="status-modal" role="dialog" aria-modal="true" aria-labelledby="delete-modal-title">
+                <div class="history-modal-header">
+                  <h3 id="delete-modal-title">Eliminar waiver</h3>
+                </div>
+                {#if adminDeleteSuccess}
+                  <p class="delete-success">{adminDeleteSuccess}</p>
+                {:else}
+                  <p>¿Está seguro de eliminar el waiver <b>{adminDeleteRow.id}</b>?</p>
+                  <p class="muted">El registro se ocultará de las consultas normales y conservará su auditoría.</p>
+                  <div class="history-modal-footer">
+                    <button type="button" class="danger-button" on:click={deleteAdminWaiver} disabled={adminDeleteBusy}>Eliminar</button>
+                    <button type="button" class="secondary" on:click={() => (adminDeleteRow = null)} disabled={adminDeleteBusy}>Cancelar</button>
+                  </div>
+                {/if}
+              </div>
+            </div>
+          {/if}
           {#if adminStatusEditRow}
             <div class="status-modal-backdrop">
               <div class="status-modal" role="dialog" aria-modal="true" aria-labelledby="status-modal-title">
@@ -1931,7 +1992,23 @@ async function reviewStaffWaiver(decision) {
               </div>
             </div>
           {/if}
-          {#if adminHistory?.loading}
+          {#if adminRecord?.data}
+            <div class="history-modal-backdrop">
+              <div class="history-modal" role="dialog" aria-modal="true">
+                <div class="history-modal-header">
+                  <h3>Expediente de {adminRecord.data.visitor.fullName}</h3>
+                  <button type="button" class="secondary history-modal-close" on:click={() => (adminRecord = null)}>×</button>
+                </div>
+                <p><b>Correo:</b> {adminRecord.data.visitor.email}</p>
+                <p><b>Teléfono:</b> {adminRecord.data.visitor.phone}</p>
+                <p><b>Procedencia:</b> {adminRecord.data.visitor.cityState}</p>
+                <h4>Historial de waivers</h4>
+                {#each adminRecord.data.visits as visit}
+                  <div class="history-event"><b>{visit.folio}</b> · {visit.attractionName} · {visit.status} · {new Date(visit.createdAt).toLocaleString("es-MX")}</div>
+                {/each}
+              </div>
+            </div>
+          {:else if adminHistory?.loading}
             <div class="history-modal-backdrop">
               <div class="history-modal" role="dialog" aria-modal="true" aria-label="Cargando historial">
                 <p>Cargando historial...</p>
@@ -2740,11 +2817,25 @@ async function reviewStaffWaiver(decision) {
     color: #1f4a3b;
     font-weight: 700;
   }
+  .report-table th:nth-last-child(3),
+  .report-table td:nth-last-child(3) {
+    position: sticky;
+    right: 174px;
+    z-index: 2;
+    width: 82px;
+    min-width: 82px;
+    background: #fff;
+    box-shadow: -5px 0 8px rgba(31, 74, 59, 0.08);
+  }
+  .report-table th:nth-last-child(3) {
+    background: #f0e6d4;
+    z-index: 4;
+  }
   .report-table th:nth-last-child(2),
   .report-table td:nth-last-child(2) {
     position: sticky;
     right: 92px;
-    z-index: 2;
+    z-index: 3;
     width: 82px;
     min-width: 82px;
     background: #fff;
@@ -2752,13 +2843,13 @@ async function reviewStaffWaiver(decision) {
   }
   .report-table th:nth-last-child(2) {
     background: #f0e6d4;
-    z-index: 4;
+    z-index: 5;
   }
   .report-table th:last-child,
   .report-table td:last-child {
     position: sticky;
     right: 0;
-    z-index: 3;
+    z-index: 4;
     width: 92px;
     min-width: 92px;
     background: #fff;
@@ -2766,7 +2857,7 @@ async function reviewStaffWaiver(decision) {
   }
   .report-table th:last-child {
     background: #f0e6d4;
-    z-index: 5;
+    z-index: 6;
   }
   .pager {
     width: 100%;
@@ -2857,7 +2948,6 @@ async function reviewStaffWaiver(decision) {
     z-index: 40;
     padding: 16px;
   }
-  .review-signature { max-width: 100%; height: auto; }
   .modal-card {
     max-height: calc(100dvh - 32px);
     overflow-y: auto;
@@ -2955,6 +3045,33 @@ async function reviewStaffWaiver(decision) {
     background: #1976d2;
     color: #fff;
     border-color: #125da5;
+  }
+  .delete-icon-button {
+    background: #fff;
+    color: #000;
+    border: 1px solid #c9c9c9;
+  }
+  .delete-icon-button:hover,
+  .delete-icon-button:focus-visible {
+    background: #b42318;
+    color: #fff;
+    border-color: #8f1d14;
+  }
+  .danger-button {
+    background: #b42318;
+    color: #fff;
+    border: 1px solid #8f1d14;
+  }
+  .danger-button:hover,
+  .danger-button:focus-visible {
+    background: #8f1d14;
+    border-color: #74170f;
+  }
+  .delete-success {
+    margin: 22px 0;
+    color: #137333;
+    font-weight: 700;
+    text-align: center;
   }
   .status-modal-backdrop {
     position: fixed;

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requireAuth, requireRoles } from "../lib/auth.js";
+import { requireAuth, requirePermissions, requireRoles } from "../lib/auth.js";
 import { Waiver } from "../models/Waiver.js";
 import { verifyWaiverToken } from "../lib/token.js";
 import { nowMs, perfLog } from "../lib/perf.js";
@@ -7,6 +7,37 @@ import { waiverDisplayId } from "../lib/folio.js";
 import { getWaiverQrExpiresAt, isWaiverQrExpired } from "../lib/waiverValidity.js";
 import { WaiverAuditEvent } from "../models/WaiverAuditEvent.js";
 
+function mapStaffWaiver(waiver) {
+  return {
+    databaseId: waiver._id,
+    id: waiverDisplayId(waiver),
+    attractionId: waiver.attractionId,
+    attractionName: waiver.attractionName,
+    attractionNames: waiver.attractionNames || [],
+    fullName: waiver.participant?.fullName || "",
+    birthDate: waiver.participant?.birthDate || "",
+    participant: waiver.participant,
+    isMinor: waiver.isMinor,
+    guardian: waiver.guardian
+      ? {
+          fullName: waiver.guardian.fullName,
+          relation: waiver.guardian.relation,
+          phone: waiver.guardian.phone,
+          email: waiver.guardian.email
+        }
+      : null,
+    answers: waiver.answers,
+    acceptedText: waiver.acceptedText,
+    signatureName: waiver.signatureName,
+    hasSignature: Boolean(waiver.signatureImage),
+    witness: { hasSignature: Boolean(waiver.witness?.signatureImage) },
+    waiverTextSnapshot: waiver.waiverTextSnapshot,
+    schedule: waiver.schedule || null,
+    signedAt: waiver.createdAt,
+    status: waiver.status === "signed" ? "pending" : waiver.status,
+    review: waiver.review || null
+  };
+}
 import { parkDateTime } from "../../../shared/visitSchedule.js";
 import { visitQrResult } from "../lib/visitQr.js";
 
@@ -14,7 +45,10 @@ export function reportRoutes({ jwtSecret }) {
   const router = Router();
   router.use(requireAuth(jwtSecret), requireRoles("admin", "staff"));
 
-  router.post("/waivers/:id/review", async (req, res) => {
+  router.post(
+    "/waivers/:id/review",
+    requirePermissions("waiver.review", "waiver.comment"),
+    async (req, res) => {
     const decision = String(req.body?.decision || "").trim();
     const comment = String(req.body?.comment || "").trim();
 
@@ -28,7 +62,7 @@ export function reportRoutes({ jwtSecret }) {
       return res.status(400).json({ error: "El comentario no puede exceder 1000 caracteres." });
     }
 
-    const waiver = await Waiver.findOne({ _id: req.params.id, status: { $in: ["pending", "signed"] } });
+    const waiver = await Waiver.findOne({ _id: req.params.id, deletedAt: null, status: { $in: ["pending", "signed"] } });
     if (!waiver) {
       return res.status(404).json({ error: "Waiver no encontrado o revocado." });
     }
@@ -70,15 +104,114 @@ export function reportRoutes({ jwtSecret }) {
         reviewedAt: waiver.review.reviewedAt
       }
     });
-  });
+    }
+  );
 
-router.get("/validate/:token", async (req, res) => {
+  router.patch(
+    "/waivers/:id/schedule",
+    requirePermissions("waiver.schedule.assign"),
+    async (req, res) => {
+      const qrToken = String(req.body?.qrToken || "").trim();
+      const date = String(req.body?.date || "").trim();
+      const group = String(req.body?.group || "").trim();
+      const time = String(req.body?.time || "").trim();
+      const attractionId = String(req.body?.attractionId || "").trim();
+
+      if (!qrToken || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !group || !time || !attractionId) {
+        return res.status(400).json({ error: "Fecha, grupo, horario, atracción y QR son obligatorios." });
+      }
+
+      let payload;
+      try {
+        payload = verifyWaiverToken(qrToken, jwtSecret);
+      } catch (_error) {
+        return res.status(400).json({ error: "QR inválido." });
+      }
+      if (String(payload.waiverId) !== String(req.params.id)) {
+        return res.status(403).json({ error: "El QR no corresponde al waiver." });
+      }
+
+      const waiver = await Waiver.findOne({ _id: req.params.id, deletedAt: null });
+      if (!waiver || ["revoked", "rejected"].includes(waiver.status)) {
+        return res.status(404).json({ error: "Waiver no encontrado o no disponible." });
+      }
+      if (![String(waiver.attractionId), ...(waiver.attractionIds || []).map(String)].includes(attractionId)) {
+        return res.status(400).json({ error: "La atracción no pertenece al waiver." });
+      }
+
+      const attractionName = waiver.attractionName;
+      waiver.schedule = { date, group, time, attractionId, attractionName, assignedBy: req.user._id, assignedAt: new Date() };
+      await waiver.save();
+      await WaiverAuditEvent.create({
+        waiverId: waiver._id,
+        userId: req.user._id,
+        userRole: req.user.role,
+        action: "schedule_assigned",
+        metadata: { date, group, time, attractionId, attractionName }
+      });
+      return res.json({ ok: true, waiver: { id: waiverDisplayId(waiver), schedule: waiver.schedule } });
+    }
+  );
+
+  router.post(
+    "/waivers/:id/ticket",
+    requirePermissions("waiver.ticket.print"),
+    async (req, res) => {
+      const qrToken = String(req.body?.qrToken || "").trim();
+      if (!qrToken) return res.status(400).json({ error: "El QR es obligatorio." });
+
+      let payload;
+      try {
+        payload = verifyWaiverToken(qrToken, jwtSecret);
+      } catch (_error) {
+        return res.status(400).json({ error: "QR inválido." });
+      }
+      if (String(payload.waiverId) !== String(req.params.id)) {
+        return res.status(403).json({ error: "El QR no corresponde al waiver." });
+      }
+
+      const waiver = await Waiver.findOne({ _id: req.params.id, deletedAt: null }).lean();
+      if (!waiver || ["revoked", "rejected"].includes(waiver.status)) {
+        return res.status(404).json({ error: "Waiver no encontrado o no disponible." });
+      }
+      if (waiver.status !== "approved") {
+        return res.status(409).json({ error: "El waiver debe estar aprobado para imprimir el ticket." });
+      }
+      if (!waiver.schedule?.date || !waiver.schedule?.time || !waiver.schedule?.group) {
+        return res.status(409).json({ error: "Primero asigna un horario al waiver." });
+      }
+
+      await WaiverAuditEvent.create({
+        waiverId: waiver._id,
+        userId: req.user._id,
+        userRole: req.user.role,
+        action: "ticket_printed",
+        metadata: { source: "staff_ticket", folio: waiverDisplayId(waiver) }
+      });
+
+      return res.json({
+        ok: true,
+        ticket: {
+          id: waiverDisplayId(waiver),
+          fullName: waiver.participant.fullName,
+          attractionName: waiver.schedule.attractionName || waiver.attractionName,
+          date: waiver.schedule.date,
+          time: waiver.schedule.time,
+          group: waiver.schedule.group,
+          cityState: waiver.participant.cityState || "",
+          qrToken
+        }
+      });
+    }
+  );
+
+router.get("/validate/:token", requirePermissions("waiver.scan"), async (req, res) => {
   try {
     const payload = verifyWaiverToken(req.params.token, jwtSecret);
     const waiverId = payload.waiverId;
 
     const firstLookupAt = nowMs();
-    const waiver = await Waiver.findById(waiverId).lean();
+    const waiver = await Waiver.findOne({ _id: waiverId, deletedAt: null }).lean();
 
     perfLog("db_query", {
       operation: "reports_validate_find_by_id",
@@ -113,6 +246,13 @@ router.get("/validate/:token", async (req, res) => {
       return res.json(result);
     }
 
+      if (["pending", "signed"].includes(waiver.status)) {
+        return res.json({
+          valid: true,
+          requiresReview: true,
+          waiver: mapStaffWaiver({ ...waiver, status: "pending" })
+        });
+      }
     // A partir de aquí estamos en el flujo LEGACY,
     // porque el waiver no tiene visitDate.
 
@@ -127,6 +267,9 @@ router.get("/validate/:token", async (req, res) => {
       });
     }
 
+        if (false) {
+          return res.status(404).json({ valid: false, error: "Waiver inválido o revocado." });
+        }
     // Los QR legacy conservan su comportamiento de un solo uso.
     if (waiver.qrConsumedAt) {
       return res.json({
@@ -215,7 +358,7 @@ router.get("/validate/:token", async (req, res) => {
 });
 
 // Explicit Staff action: reading/scanning a new QR never approves or consumes it.
-router.post("/validate/:token", async (req, res) => {
+router.post("/validate/:token", requirePermissions("waiver.scan"), async (req, res) => {
   let payload;
 
   try {
@@ -225,7 +368,7 @@ router.post("/validate/:token", async (req, res) => {
   }
 
   try {
-    const waiver = await Waiver.findById(payload.waiverId).lean();
+    const waiver = await Waiver.findOne({ _id: payload.waiverId, deletedAt: null }).lean();
 
     if (!waiver || ["revoked", "rejected"].includes(waiver.status)) {
       return res.status(404).json({
@@ -304,7 +447,7 @@ router.post("/validate/:token", async (req, res) => {
   }
 });
 
-  router.get("/waivers", async (req, res) => {
+  router.get("/waivers", requireRoles("admin"), async (req, res) => {
     const query = {};
     if (req.query.attractionId) query.attractionId = req.query.attractionId;
     if (req.query.from || req.query.to) {
