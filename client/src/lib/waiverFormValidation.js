@@ -1,3 +1,5 @@
+import { canRegisterVisit } from "../../../shared/visitSchedule.js";
+
 export const REFERENCE_MIN_LENGTH = 2;
 export const PHONE_MIN_LENGTH = 7;
 
@@ -27,6 +29,8 @@ export function collectWaiverFieldErrors({
   foreignCityState
 }) {
   const errors = {};
+
+  if (!canRegisterVisit(form.visitDate)) errors.visitDate = true;
 
   if (!selectedAttractionIds?.length) errors.attractionId = true;
   if (!meaningfulText(form.fullName, 3)) errors.fullName = true;

@@ -1,9 +1,9 @@
 import jwt from "jsonwebtoken";
 
-const EXPIRATION_DAYS = 3650;
-
 export function signWaiverToken(waiverId, secret) {
-  return jwt.sign({ waiverId }, secret, { expiresIn: `${EXPIRATION_DAYS}d` });
+  // Business validity is evaluated from the waiver on every lookup: Staff assigns
+  // the visit time later. A fixed JWT expiry could invalidate a pending visit early.
+  return jwt.sign({ waiverId }, secret);
 }
 
 export function verifyWaiverToken(token, secret) {

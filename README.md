@@ -73,3 +73,18 @@ El backend sirve archivos estaticos de `client/dist`, por lo tanto Render solo n
 ## Notas legales
 
 El texto del waiver incluido es generico para Mexico y debe ser revisado por asesoria legal antes de produccion.
+
+## Visitas y validación de carta responsiva
+
+El visitante indica el día con al menos 24 horas de anticipación al inicio de ese día
+(en `America/Chihuahua`). La carta nace en **Pendiente de validación**. Staff valida y
+asigna una hora general; el QR permanece vigente hasta terminar el día siguiente.
+Las cartas anteriores conservan sus reglas originales.
+
+Para pruebas locales, iniciar Vite con
+`VITE_DEV_API_PROXY=http://localhost:4000 npm run dev:client`
+(el proxy predeterminado apunta a producción). Ejecutar `npm test` y `npm run build`.
+
+El correo requiere `RESEND_API_KEY`, `RESEND_FROM_EMAIL` y `PUBLIC_BASE_URL`.
+Ver [reporte técnico y guía de pruebas](docs/waiver-visitas.md) para el flujo completo,
+archivos, decisiones, configuración y criterios de aceptación.

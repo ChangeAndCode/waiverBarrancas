@@ -17,6 +17,8 @@
   import { getMessages, NATIONALITY_EN } from "./lib/i18n.js";
   import { WAIVER_TEXT_EN_HTML } from "./lib/waiverTextEn.js";
 
+  import { earliestVisitDate, PARK_TIME_ZONE } from "../../shared/visitSchedule.js";
+
   const API_BASE = "/api";
   const ATTRACTION_SCHEDULE_BY_CODE = {
     ZIPRIDER: "9:00 a 15:30 (Salidas en el momento)",
@@ -31,6 +33,7 @@
   let loading = false;
   let message = "";
   let qrCanvas;
+  let checkQrCanvas;
   let signatureCanvas;
   let signatureHasStroke = false;
   let guardianSignatureCanvas;
@@ -120,6 +123,7 @@
   let adminTab = "new-attraction";
 
 let form = {
+  visitDate: "",
   fullName: "",
   birthDate: "",
   gender: "",
@@ -553,6 +557,7 @@ let form = {
     localStorage.removeItem("pendingWaiverDraftKey");
     localStorage.removeItem("pendingWaiverPayload");
     form = {
+      visitDate: "",
       fullName: "",
       birthDate: "",
       gender: "",
@@ -726,7 +731,7 @@ let form = {
     if (!validateWaiverForm()) {
       waiverSubmitInFlight = false;
       loading = false;
-      message = L.reviewFields;
+      message = fieldErrors.visitDate ? L.visitDateInvalid : L.reviewFields;
       await scrollToFirstInvalidField();
       return;
     }
@@ -762,6 +767,7 @@ let form = {
       const { ids: selectedAttractionIds } = getSelectedParkAttractionState();
 
       const pendingWaiverPayload = {
+        visitDate: form.visitDate,
         attractionId: selectedAttractionIds[0],
         attractionIds: selectedAttractionIds,
         participant: {
@@ -975,6 +981,7 @@ async function handleCancelledPayment() {
     staffScanError = "";
     try {
       staffScanResult = await api(`/reports/validate/${encodeURIComponent(token)}`);
+      stopStaffScan();
       staffReviewComment = "";
       staffSchedule = { date: "", group: "", time: "", attractionId: staffScanResult?.waiver?.attractionId || "" };
     } catch (e) {
@@ -985,31 +992,60 @@ async function handleCancelledPayment() {
     }
   }
 
-  async function reviewStaffWaiver(decision) {
-    const databaseId = staffScanResult?.waiver?.databaseId;
-    const comment = staffReviewComment.trim();
-    if (!databaseId) return;
-    if (decision === "rejected" && !comment) {
-      staffScanError = "Escribe un comentario para rechazar el waiver.";
-      return;
-    }
-    staffReviewBusy = true;
-    staffScanError = "";
-    try {
-      const result = await api(`/reports/waivers/${databaseId}/review`, "POST", {
+function statusLabel(status) {
+  return ({
+    pending: "Pendiente de validación",
+    approved: "Aprobada",
+    rejected: "Rechazada",
+    signed: "Pendiente de validación",
+    revoked: "Revocada"
+  })[status] || status;
+}
+
+function parkDateTimeLabel(value) {
+  return value
+    ? new Date(value).toLocaleString("es-MX", { timeZone: PARK_TIME_ZONE })
+    : "Por asignar";
+}
+
+async function reviewStaffWaiver(decision) {
+  const databaseId = staffScanResult?.waiver?.databaseId;
+  const comment = staffReviewComment.trim();
+
+  if (!databaseId) return;
+
+  if (decision === "rejected" && !comment) {
+    staffScanError = "Escribe un comentario para rechazar el waiver.";
+    return;
+  }
+
+  staffReviewBusy = true;
+  staffScanError = "";
+
+  try {
+    const result = await api(
+      `/reports/waivers/${databaseId}/review`,
+      "POST",
+      {
         decision,
         comment
-      });
-      staffScanResult = {
-        ...staffScanResult,
-        waiver: { ...staffScanResult.waiver, review: result.waiver }
-      };
-    } catch (e) {
-      staffScanError = e.message;
-    } finally {
-      staffReviewBusy = false;
-    }
+      }
+    );
+
+    staffScanResult = {
+      ...staffScanResult,
+      waiver: {
+        ...staffScanResult.waiver,
+        review: result.waiver
+      }
+    };
+
+  } catch (e) {
+    staffScanError = e.message;
+  } finally {
+    staffReviewBusy = false;
   }
+}
 
   async function assignStaffSchedule() {
     const databaseId = staffScanResult?.waiver?.databaseId;
@@ -1161,6 +1197,10 @@ async function handleCancelledPayment() {
       if (typeof data.valid === "boolean") {
         checkData = data;
         message = data.error || "";
+        if (data.valid) {
+          await tick();
+          if (checkQrCanvas) await QRCode.toCanvas(checkQrCanvas, `${window.location.origin}/check/${token}`);
+        }
       } else {
         checkData = null;
         message = "No se pudo cargar el código.";
@@ -1483,9 +1523,17 @@ async function handleCancelledPayment() {
 
   {#if path.startsWith("/check/")}
     <section class="card">
-      <h2>Tu código de acceso</h2>
+      <h2>Tu carta responsiva</h2>
+      <p><b>{L.noAdmissionGuarantee}</b></p>
       {#if checkData?.valid}
-        <p class="ok">Listo para ingresar</p>
+        <p class="ok">{statusLabel(checkData.waiver.status)}</p>
+        <canvas bind:this={checkQrCanvas}></canvas>
+        {#if checkData.waiver.visitDate}
+          <p><b>Día de visita:</b> {checkData.waiver.visitDate}</p>
+          <p><b>Horario (Chihuahua):</b> {parkDateTimeLabel(checkData.waiver.assignedAt)}</p>
+          <p>{L.validityHelp}</p>
+          {#if checkData.waiver.expiresAt}<p><b>Vence al iniciar:</b> {parkDateTimeLabel(checkData.waiver.expiresAt)} (hora del parque)</p>{/if}
+        {/if}
         <p><b>Nombre:</b> {checkData.waiver.fullName}</p>
         <p><b>Atracción:</b> {checkData.waiver.attractionName}</p>
         <p><b>Fecha de firma:</b> {new Date(checkData.waiver.signedAt).toLocaleString()}</p>
@@ -1496,7 +1544,7 @@ async function handleCancelledPayment() {
       {:else if checkData?.reason === "qr_expired"}
         <p class="bad">Vigencia vencida</p>
         <p class="muted">
-          Este waiver venció 72 horas después de firmarse. Es necesario firmar uno nuevo.
+          La vigencia de este QR terminó. Consulta a Staff antes de realizar las actividades.
         </p>
         <p><b>Firmado el:</b> {new Date(checkData.signedAt).toLocaleString("es-MX")}</p>
         <p><b>Venció el:</b> {new Date(checkData.expiresAt).toLocaleString("es-MX")}</p>
@@ -1531,8 +1579,9 @@ async function handleCancelledPayment() {
       <h2>Panel Staff</h2>
       <p>Usuario: {authUser?.name} ({authUser?.role})</p>
       <p class="muted">
-        Inicia sesión aquí (sesión hasta 7 días). Valida con la cámara o pegando el enlace; solo entonces el QR queda
-        usado. Si el visitante abre el enlace del correo, solo ve su pase, sin gastarlo.
+        Consulta la carta con la cámara o pegando el enlace. Para las visitas nuevas, revisa la carta y
+        confirma disponibilidad antes de asignar el horario general y validar. El QR puede consultarse nuevamente durante su vigencia.
+        Los registros anteriores mantienen su validación de un solo uso.
       </p>
 
       <h3>Validar QR</h3>
@@ -1556,10 +1605,9 @@ async function handleCancelledPayment() {
 
       {#if staffScanResult?.valid}
         <div class="staff-scan-result">
-          <p class="ok">VÁLIDO — registrado</p>
+          <p class="ok">{statusLabel(staffScanResult.waiver.status)}</p>
           <p><b>Nombre:</b> {staffScanResult.waiver.fullName}</p>
           <p><b>Atracción:</b> {staffScanResult.waiver.attractionName}</p>
-           <p><b>Folio:</b> {staffScanResult.waiver.id}</p>
            <p><b>Correo:</b> {staffScanResult.waiver.participant?.email}</p>
            <p><b>Teléfono:</b> {staffScanResult.waiver.participant?.phone}</p>
            <p><b>Estado de procedencia:</b> {staffScanResult.waiver.participant?.cityState}</p>
@@ -1605,6 +1653,7 @@ async function handleCancelledPayment() {
               <button type="button" class="secondary" on:click={() => reviewStaffWaiver("rejected")} disabled={staffReviewBusy}>Rechazar waiver</button>
             </div>
           {/if}
+          <p><b>Folio:</b> {staffScanResult.waiver.id}</p>
         </div>
       {:else if staffScanResult?.reason === "qr_expired"}
         <div class="staff-scan-result">
@@ -1813,7 +1862,7 @@ async function handleCancelledPayment() {
                     <td>{row.email}</td>
                     <td>{row.phone}</td>
                     <td>{row.birthDate}</td>
-                    <td>{row.status}</td>
+                    <td>{statusLabel(row.status)}{#if row.visitDate}<br />Visita: {row.visitDate}<br />Horario: {parkDateTimeLabel(row.assignedAt)}{/if}</td>
                     <td>{row.qrConsumedAt ? new Date(row.qrConsumedAt).toLocaleString("es-MX") : "—"}</td>
                     <td>{new Date(row.createdAt).toLocaleString()}</td>
                     <td>
@@ -2032,6 +2081,12 @@ async function handleCancelledPayment() {
   {:else}
     <section class="card waiver-form" style={`--field-error-hint: "${L.fieldRequired}"`}>
       <h2>{L.waiverTitle}</h2>
+      <p><b>{L.noAdmissionGuarantee}</b></p>
+      <div class="field-group" class:field-invalid={fieldInvalid("visitDate")}>
+        <label class="field-label" for="visitDate">{L.visitDate}</label>
+        <input id="visitDate" type="date" bind:value={form.visitDate} min={earliestVisitDate()} aria-describedby="visitDateHelp" />
+        <p id="visitDateHelp" class="muted">{L.visitDateHelp}</p>
+      </div>
       {#if message}
         <p
           class={showFieldErrors && Object.keys(fieldErrors).length > 0 ? "field-error-banner" : "bad"}
@@ -2286,6 +2341,10 @@ async function handleCancelledPayment() {
       <section class="modal-backdrop">
         <div class="modal-card">
           <h2>{L.waiverSigned}</h2>
+          <p class="ok">{L.pendingValidation}</p>
+          <p><b>{L.noAdmissionGuarantee}</b></p>
+          <p><b>{L.visitDate}:</b> {waiverResult.visitDate}</p>
+          <p>{L.validityHelp}</p>
           <p><b>{L.folio}:</b> {waiverResult.folio || waiverResult.waiverId}</p>
           <p><b>{L.signedAt}:</b> {new Date(waiverResult.signedAt).toLocaleString(locale === "en" ? "en-US" : "es-MX")}</p>
           <p><b>{L.qrTitle}</b></p>
@@ -2295,7 +2354,10 @@ async function handleCancelledPayment() {
           </p>
           {#if waiverResult.emailSent}
             <p class="ok">{L.emailSent}</p>
+          {:else}
+            <p class="bad">{L.emailFailed}</p>
           {/if}
+          <a href={waiverResult.qrUrl}>{L.saveQrLink}</a>
           <button type="button" on:click={resetRegistrationFlow}>{L.accept}</button>
         </div>
       </section>
@@ -2887,6 +2949,8 @@ async function handleCancelledPayment() {
     padding: 16px;
   }
   .modal-card {
+    max-height: calc(100dvh - 32px);
+    overflow-y: auto;
     width: min(760px, 100%);
     background: #fffaf3;
     border-radius: 10px;
