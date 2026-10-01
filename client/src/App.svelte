@@ -83,6 +83,7 @@
   let paymentSuccessInFlight = false;
 
   let recoveryEmail = "", recoveryCode = "", recoverySession = "", recoveryWaivers = [], recoverySelected = "", recoveryAttraction = "", recoveryQr = "", recoveryNotice = "", recoveryBusy = false;
+  let recoveryCodeSent = false;
   let additionalDrafts = {};
   async function recoveryApi(endpoint, method = "GET", body) {
     const response = await fetch(`${API_BASE}/public/recovery${endpoint}`, { method,
@@ -97,6 +98,7 @@
     try {
       if (step === "request") {
         await recoveryApi("/request", "POST", { email: recoveryEmail });
+        recoveryCodeSent = true;
         recoverySession = ""; recoveryWaivers = []; recoverySelected = ""; recoveryNotice = L.recoverySent;
       } else if (step === "verify") {
         const result = await recoveryApi("/verify", "POST", { code: recoveryCode });
@@ -2191,27 +2193,35 @@ async function reviewStaffWaiver(decision) {
       <p><b>{L.noAdmissionGuarantee}</b></p>
       <details class="card">
         <summary>{L.recoveryTitle}</summary>
-        <label>{L.recoveryEmail}<input type="email" bind:value={recoveryEmail} /></label>
-        <button type="button" disabled={recoveryBusy} on:click={() => recover("request")}>{L.recoverySend}</button>
-        <label>{L.recoveryCode}<input bind:value={recoveryCode} autocomplete="one-time-code" /></label>
-        <button type="button" disabled={recoveryBusy} on:click={() => recover("verify")}>{L.recoveryVerify}</button>
-        {#if recoverySession}
-          <label>{L.recoveryChoose}<select bind:value={recoverySelected} on:change={() => { recoveryAttraction = ""; recoveryQr = ""; }}><option value="">—</option>
-            {#each recoveryWaivers as w}<option value={w.id}>{w.folio} · {w.fullName} · {w.visitDate} · {w.attractionName}</option>{/each}
-          </select></label>
-          {#if recoverySelected}
-            {@const selected = recoveryWaivers.find(w => w.id === recoverySelected)}
-            {#if selected}
-              {#if selected.qrUrl}<a href={selected.qrUrl}>{L.saveQrLink}</a>{:else}<label>{L.historicalQr}<input bind:value={recoveryQr} /></label>{/if}
-              <label>{L.attraction}<select bind:value={recoveryAttraction}><option value="">—</option>
-                {#each attractions.filter(a => !selected.attractionIds.includes(a._id)) as a}<option value={a._id}>{a.name}</option>{/each}
-              </select></label>
-              <button type="button" disabled={recoveryBusy || !recoveryAttraction} on:click={() => recover("add")}>{L.additionalRequest}</button>
-              {#each selected.additionalActivities as a}<p>{a.attractionName} · {statusLabel(a.status)}</p>{/each}
+        <div class="recovery-content">
+          <div class="recovery-step">
+            <label class="field-label">{L.recoveryEmail}<input type="email" bind:value={recoveryEmail} /></label>
+            <button type="button" disabled={recoveryBusy} on:click={() => recover("request")}>{L.recoverySend}</button>
+          </div>
+          {#if recoveryCodeSent}
+            <div class="recovery-step">
+              <label class="field-label">{L.recoveryCode}<input bind:value={recoveryCode} autocomplete="one-time-code" /></label>
+              <button type="button" disabled={recoveryBusy} on:click={() => recover("verify")}>{L.recoveryVerify}</button>
+            </div>
+          {/if}
+          {#if recoverySession}
+            <label>{L.recoveryChoose}<select bind:value={recoverySelected} on:change={() => { recoveryAttraction = ""; recoveryQr = ""; }}><option value="">—</option>
+              {#each recoveryWaivers as w}<option value={w.id}>{w.folio} · {w.fullName} · {w.visitDate} · {w.attractionName}</option>{/each}
+            </select></label>
+            {#if recoverySelected}
+              {@const selected = recoveryWaivers.find(w => w.id === recoverySelected)}
+              {#if selected}
+                {#if selected.qrUrl}<a href={selected.qrUrl}>{L.saveQrLink}</a>{:else}<label>{L.historicalQr}<input bind:value={recoveryQr} /></label>{/if}
+                <label>{L.attraction}<select bind:value={recoveryAttraction}><option value="">—</option>
+                  {#each attractions.filter(a => !selected.attractionIds.includes(a._id)) as a}<option value={a._id}>{a.name}</option>{/each}
+                </select></label>
+                <button type="button" disabled={recoveryBusy || !recoveryAttraction} on:click={() => recover("add")}>{L.additionalRequest}</button>
+                {#each selected.additionalActivities as a}<p>{a.attractionName} · {statusLabel(a.status)}</p>{/each}
+              {/if}
             {/if}
           {/if}
-        {/if}
-        {#if recoveryNotice}<p role="status">{recoveryNotice}</p>{/if}
+          {#if recoveryNotice}<p role="status">{recoveryNotice}</p>{/if}
+        </div>
       </details>
       <div class="field-group" class:field-invalid={fieldInvalid("visitDate")}>
         <label class="field-label" for="visitDate">{L.visitDate}</label>
@@ -2593,6 +2603,31 @@ async function reviewStaffWaiver(decision) {
   .waiver-form {
     gap: 16px;
   }
+  .recovery-content,
+  .recovery-step {
+    display: grid;
+    gap: 12px;
+    min-width: 0;
+  }
+  .recovery-content {
+    margin-top: 12px;
+  }
+  .recovery-content label {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+    font-weight: 600;
+    color: #1f4a3b;
+  }
+  .recovery-content input,
+  .recovery-content select {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+  }
+  .recovery-content button {
+    min-height: 44px;
+  }
   .waiver-form .form-section {
     border: 1px solid #e3d7c4;
     border-radius: 10px;
@@ -2824,6 +2859,10 @@ async function reviewStaffWaiver(decision) {
     min-height: 44px;
   }
   @media (min-width: 600px) {
+    .recovery-step {
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: end;
+    }
     .form-grid-2 {
       grid-template-columns: 1fr 1fr;
     }
