@@ -2,6 +2,18 @@ import mongoose from "mongoose";
 
 const waiverSchema = new mongoose.Schema(
   {
+    qrToken: { type: String, default: null, select: true },
+    qrUrl: { type: String, default: "" },
+    additionalActivities: [{
+      attractionId: { type: mongoose.Schema.Types.ObjectId, ref: "Attraction", required: true },
+      attractionName: { type: String, required: true },
+      status: { type: String, enum: ["pending", "approved", "rejected", "revoked"], default: "pending" },
+      requestedAt: { type: Date, default: Date.now },
+      validatedAt: { type: Date, default: null },
+      validatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+      review: { decision: String, comment: String, reviewedAt: Date, reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" } },
+      schedule: { date: String, time: String, group: String, assignedAt: Date, assignedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" } }
+    }],
     attractionId: { type: mongoose.Schema.Types.ObjectId, ref: "Attraction", required: true },
     attractionName: { type: String, required: true },
     attractionIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "Attraction" }],

@@ -1,3 +1,4 @@
+import { recoveryRoutes } from "./routes/recovery.js";
 import express from "express";
 import cors from "cors";
 import mongoose from "mongoose";
@@ -102,6 +103,7 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
 });
 
+app.use("/api/public/recovery", recoveryRoutes({ jwtSecret }));
 app.use("/api/public", publicRoutes({ jwtSecret }));
 app.use("/api/auth", authRoutes({ jwtSecret }));
 app.use("/api/admin", adminRoutes({ jwtSecret }));

@@ -1,3 +1,4 @@
+import { additionalStaffRoutes } from "./additionalStaff.js";
 import { Router } from "express";
 import { requireAuth, requirePermissions, requireRoles } from "../lib/auth.js";
 import { Waiver } from "../models/Waiver.js";
@@ -61,6 +62,7 @@ function staffVisitResult(waiver) {
 export function reportRoutes({ jwtSecret }) {
   const router = Router();
   router.use(requireAuth(jwtSecret), requireRoles("admin", "staff"));
+  router.use(additionalStaffRoutes({ jwtSecret }));
 
   router.post(
     "/waivers/:id/review",
@@ -191,6 +193,7 @@ export function reportRoutes({ jwtSecret }) {
       if (!waiver || ["revoked", "rejected"].includes(waiver.status)) {
         return res.status(404).json({ error: "Waiver no encontrado o no disponible." });
       }
+      if (waiver.visitDate && isWaiverQrExpired(waiver)) return res.status(409).json({ error: "Carta vencida." });
       if (waiver.status !== "approved") {
         return res.status(409).json({ error: "El waiver debe estar aprobado para imprimir el ticket." });
       }
@@ -216,7 +219,8 @@ export function reportRoutes({ jwtSecret }) {
           time: waiver.schedule.time,
           group: waiver.schedule.group,
           cityState: waiver.participant.cityState || "",
-          qrToken
+          qrToken: waiver.qrToken || qrToken,
+          qrUrl: waiver.qrUrl || ""
         }
       });
     }

@@ -1,3 +1,4 @@
+import { activitySummaries } from "../lib/additionalActivities.js";
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { Attraction } from "../models/Attraction.js";
@@ -47,6 +48,7 @@ function csvCell(v) {
 
 function mapWaiverRow(w) {
   return {
+    additionalActivities: activitySummaries(w),
     databaseId: w._id,
     id: waiverDisplayId(w),
     attractionId: w.attractionId,
