@@ -48,16 +48,30 @@ test("registration, access control, Staff assignment, repeated scans, revocation
 
 const visitorToken = signAuthToken(visitor, secret);
   assert.equal((await request(`/reports/validate/${token}`, "POST", { assignedTime: "09:00" }, visitorToken)).status, 403);
-  assert.equal((await request(`/reports/validate/${token}`, "GET", undefined, staffToken)).data.waiver.status, "pending");
+  const staffPending = (await request(`/reports/validate/${token}`, "GET", undefined, staffToken)).data;
+  assert.equal(staffPending.waiver.status, "pending");
+  assert.equal(staffPending.waiver.databaseId, waiverId);
+  assert.equal(staffPending.waiver.attractionId, String(stored.attractionId));
+  assert.equal(staffPending.waiver.participant.email, stored.participant.email);
+  assert.equal(staffPending.waiver.waiverTextSnapshot, stored.waiverTextSnapshot);
+  assert.equal(staffPending.waiver.hasSignature, true);
+  assert.equal(staffPending.waiver.witness.hasSignature, true);
+  assert.equal((await request(`/reports/waivers/${waiverId}/ticket`, "POST", { qrToken: token }, staffToken)).status, 409);
   assert.equal(stored.qrConsumedAt, null);
   assert.equal((await request(`/reports/validate/${token}`, "GET", undefined, staffToken)).data.review.participant.fullName, "Visitante Prueba");
   assert.equal((await request(`/public/check/${token}`)).data.review, undefined);
+  assert.equal((await request(`/public/check/${token}`)).data.waiver.participant, undefined);
+  assert.equal((await request(`/public/check/${token}`)).data.waiver.databaseId, undefined);
   for (const time of [null, "", "25:00", "2026-10-01T09:00"]) {
     assert.equal((await request(`/reports/validate/${token}`, "POST", { assignedTime: time }, staffToken)).status, 400);
   }
   // Two staff members cannot overwrite one another's approval.
   const approvals = await Promise.all(["09:00", "10:00"].map((assignedTime) => request(`/reports/validate/${token}`, "POST", { assignedTime }, staffToken)));
   assert.deepEqual(approvals.map((r) => r.status).sort(), [200, 409]);
+  const approvedResponse = approvals.find((r) => r.status === 200).data;
+  assert.equal(approvedResponse.waiver.databaseId, waiverId);
+  assert.equal(approvedResponse.waiver.review.decision, "approved");
+  assert.equal(approvedResponse.waiver.participant.email, stored.participant.email);
   assert.equal(stored.status, "approved");
   assert.equal(String(stored.validatedBy), String(staff._id));
   assert.ok(stored.validatedAt);
@@ -66,6 +80,23 @@ const visitorToken = signAuthToken(visitor, secret);
     assert.equal((await request(`/public/check/${token}`)).data.accessAuthorized, true);
   }
   assert.equal(stored.qrConsumedAt, null);
+  assert.equal((await request(`/reports/waivers/${waiverId}/ticket`, "POST", { qrToken: token }, staffToken)).status, 409);
+  const schedule = { qrToken: token, date: stored.visitDate, group: "Grupo 1", time: "09:00", attractionId: stored.attractionId };
+  assert.equal((await request(`/reports/waivers/${waiverId}/schedule`, "PATCH", schedule, staffToken)).status, 200);
+  const rescanned = (await request(`/reports/validate/${token}`, "GET", undefined, staffToken)).data;
+  assert.equal(rescanned.waiver.schedule.group, "Grupo 1");
+  assert.equal(rescanned.waiver.review.decision, "approved");
+  const printed = await request(`/reports/waivers/${waiverId}/ticket`, "POST", { qrToken: token }, staffToken);
+  assert.equal(printed.status, 200);
+  assert.equal(printed.data.ticket.qrToken, token);
+  assert.equal(printed.data.ticket.date, stored.visitDate);
+  assert.equal(printed.data.ticket.time, "09:00");
+  assert.equal(printed.data.ticket.group, "Grupo 1");
+  const otherId = verifyWaiverToken(another.data.token, secret).waiverId;
+  const rejected = await request(`/reports/waivers/${otherId}/review`, "POST", { decision: "rejected", comment: "No cumple requisitos" }, staffToken);
+  assert.equal(rejected.status, 200);
+  assert.equal(rejected.data.waiver.status, "rejected");
+  assert.equal((await request(`/reports/validate/${another.data.token}`, "GET", undefined, staffToken)).status, 404);
 const report = await request(
   "/admin/reports/waivers?status=approved",
   "GET",
@@ -90,6 +121,10 @@ assert.equal(report.data.items[0].visitDate, created.data.visitDate);
   const legacyId = "507f1f77bcf86cd799439011";
   records.set(legacyId, { _id: legacyId, status: "signed", participant: { fullName: "Anterior" }, createdAt: new Date(), qrConsumedAt: null });
   const legacy = signWaiverToken(legacyId, secret);
+  assert.equal((await request(`/public/check/${legacy}`)).data.reason, "waiver_pending");
+  assert.equal((await request(`/reports/validate/${legacy}`, "GET", undefined, staffToken)).data.requiresReview, true);
+  assert.equal(records.get(legacyId).qrConsumedAt, null);
+  records.get(legacyId).status = "approved";
   assert.equal((await request(`/reports/validate/${legacy}`, "GET", undefined, staffToken)).data.valid, true);
   assert.equal((await request(`/reports/validate/${legacy}`, "GET", undefined, staffToken)).data.reason, "qr_already_used");
 });

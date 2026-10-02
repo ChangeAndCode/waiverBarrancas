@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import { randomBytes } from "node:crypto";
 import { Router } from "express";
 import { Attraction } from "../models/Attraction.js";
@@ -285,7 +286,13 @@ export function publicRoutes({ jwtSecret }) {
         : attraction.waiverText;
     const folio = await generateWaiverFolio();
     const createWaiverAt = nowMs();
+    const waiverId = new mongoose.Types.ObjectId();
+    const token = signWaiverToken(String(waiverId), jwtSecret);
+    const qrUrl = `${baseUrlFromRequest(req)}/check/${token}`;
     const waiver = await Waiver.create({
+      _id: waiverId,
+      qrToken: token,
+      qrUrl,
       folio,
       visitDate,
       status: "pending",
@@ -315,8 +322,6 @@ export function publicRoutes({ jwtSecret }) {
       metadata: { source: "public_form" }
     });
 
-const token = signWaiverToken(waiver._id.toString(), jwtSecret);
-const qrUrl = `${baseUrlFromRequest(req)}/check/${token}`;
 const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=420x420&data=${encodeURIComponent(qrUrl)}`;
 
 await WaiverAuditEvent.create({

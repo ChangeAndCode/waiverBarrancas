@@ -1,3 +1,4 @@
+import { additionalStaffRoutes } from "./additionalStaff.js";
 import { Router } from "express";
 import { requireAuth, requirePermissions, requireRoles } from "../lib/auth.js";
 import { Waiver } from "../models/Waiver.js";
@@ -41,9 +42,27 @@ function mapStaffWaiver(waiver) {
 import { parkDateTime } from "../../../shared/visitSchedule.js";
 import { visitQrResult } from "../lib/visitQr.js";
 
+function staffVisitResult(waiver) {
+  const result = visitQrResult(waiver);
+  if (result.valid) {
+    result.waiver = { ...mapStaffWaiver(waiver), ...result.waiver };
+    result.review = {
+      participant: waiver.participant,
+      isMinor: waiver.isMinor,
+      guardian: waiver.guardian,
+      answers: waiver.answers,
+      signatureImage: waiver.signatureImage,
+      witness: waiver.witness,
+      waiverTextSnapshot: waiver.waiverTextSnapshot
+    };
+  }
+  return result;
+}
+
 export function reportRoutes({ jwtSecret }) {
   const router = Router();
   router.use(requireAuth(jwtSecret), requireRoles("admin", "staff"));
+  router.use(additionalStaffRoutes({ jwtSecret }));
 
   router.post(
     "/waivers/:id/review",
@@ -174,6 +193,7 @@ export function reportRoutes({ jwtSecret }) {
       if (!waiver || ["revoked", "rejected"].includes(waiver.status)) {
         return res.status(404).json({ error: "Waiver no encontrado o no disponible." });
       }
+      if (waiver.visitDate && isWaiverQrExpired(waiver)) return res.status(409).json({ error: "Carta vencida." });
       if (waiver.status !== "approved") {
         return res.status(409).json({ error: "El waiver debe estar aprobado para imprimir el ticket." });
       }
@@ -199,7 +219,8 @@ export function reportRoutes({ jwtSecret }) {
           time: waiver.schedule.time,
           group: waiver.schedule.group,
           cityState: waiver.participant.cityState || "",
-          qrToken
+          qrToken: waiver.qrToken || qrToken,
+          qrUrl: waiver.qrUrl || ""
         }
       });
     }
@@ -229,21 +250,7 @@ router.get("/validate/:token", requirePermissions("waiver.scan"), async (req, re
     // Flujo NUEVO de visitas programadas.
     // Estos QR no se consumen; visitQrResult determina si hay acceso.
     if (waiver.visitDate) {
-      const result = visitQrResult(waiver);
-
-      if (result.valid) {
-        result.review = {
-          participant: waiver.participant,
-          isMinor: waiver.isMinor,
-          guardian: waiver.guardian,
-          answers: waiver.answers,
-          signatureImage: waiver.signatureImage,
-          witness: waiver.witness,
-          waiverTextSnapshot: waiver.waiverTextSnapshot
-        };
-      }
-
-      return res.json(result);
+      return res.json(staffVisitResult(waiver));
     }
 
       if (["pending", "signed"].includes(waiver.status)) {
@@ -438,7 +445,7 @@ router.post("/validate/:token", requirePermissions("waiver.scan"), async (req, r
       }
     });
 
-    return res.json(visitQrResult(updated));
+    return res.json(staffVisitResult(updated));
   } catch (error) {
     console.error("Validación de visita:", error.message);
     return res.status(500).json({

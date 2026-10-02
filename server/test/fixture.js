@@ -1,5 +1,7 @@
 // Isolated fixture: actual Express routes and Mongoose validation; persistence replaced in memory.
 // Never import this module from production code. It does not connect to MongoDB or send mail.
+import { recoveryRoutes } from "../src/routes/recovery.js";
+import { WaiverRecovery } from "../src/models/WaiverRecovery.js";
 import express from "express";
 import mongoose from "mongoose";
 import { Waiver } from "../src/models/Waiver.js";
@@ -55,44 +57,87 @@ export function payload() {
 export function testApp(mock) {
   const records = new Map();
   let seq = 0;
- const matches = (w, filter) => Object.entries(filter).every(([key, value]) => {
-  if (value === null) {
-    return w[key] == null;
-  }
-
-  if (
-    value &&
-    typeof value === "object" &&
-    Array.isArray(value.$in)
-  ) {
-    return value.$in.some((item) => String(w[key]) === String(item));
-  }
-
-  return String(w[key]) === String(value);
-});
+  const valuesAt = (obj, path) => {
+    if (!path.length) return Array.isArray(obj) ? obj : [obj];
+    if (Array.isArray(obj)) return obj.flatMap(item => valuesAt(item, path));
+    return valuesAt(obj?.[path[0]], path.slice(1));
+  };
+  const matches = (w, filter) => Object.entries(filter).every(([key, value]) => {
+    const values = valuesAt(w, key.split("."));
+    if (value === null) return values.every(v => v == null);
+    if (value && typeof value === "object") {
+      if (value.$elemMatch) return (w[key] || []).some(a => matches(a, value.$elemMatch));
+      if (value.$ne !== undefined) return values.every(v => String(v) !== String(value.$ne));
+      if (value.$gt !== undefined) return values.some(v => new Date(v) > value.$gt);
+      if (value.$regex) return values.some(v => new RegExp(value.$regex, value.$options).test(String(v)));
+      if (value.$in) return values.some(v => value.$in.some(item => String(v) === String(item)));
+    }
+    return values.some(v => String(v) === String(value));
+  });
   const query = (rows) => {
     let offset = 0, limit = rows.length;
     return { select() { return this; }, sort() { return this; }, skip(n) { offset = n; return this; }, limit(n) { limit = n; return this; },
       async lean() { return structuredClone(rows.slice(offset, offset + limit)); } };
   };
+  mock.method(Attraction, "findOne", filter => ({ lean: async () => attractions.find(a => matches(a, filter)) || null }));
   mock.method(Attraction, "find", (filter) => query(attractions.filter((a) => !filter._id || filter._id.$in.includes(String(a._id)))));
   mock.method(FolioCounter, "exists", async () => true);
   mock.method(FolioCounter, "findByIdAndUpdate", async () => ({ seq: ++seq }));
   mock.method(Waiver, "create", async (data) => {
     const doc = new Waiver(data);
     await doc.validate();
-    const w = { ...doc.toObject(), _id: String(doc._id), createdAt: new Date(), updatedAt: new Date() };
+    // Preserve ObjectId values as strings when cloning records in memory.
+    const w = { ...JSON.parse(JSON.stringify(doc.toObject())), _id: String(doc._id), createdAt: new Date(), updatedAt: new Date() };
     records.set(w._id, w);
     return w;
   });
-  mock.method(Waiver, "findById", (id) => ({ lean: async () => structuredClone(records.get(String(id)) || null) }));
+  const singleQuery = (lookup) => ({
+    lean: async () => structuredClone(lookup() || null),
+    then(resolve, reject) {
+      const record = lookup();
+      const document = record ? { ...structuredClone(record), async save() {
+        const { save, ...data } = this;
+        Object.assign(record, data);
+      } } : null;
+      return Promise.resolve(document).then(resolve, reject);
+    }
+  });
+  mock.method(Waiver, "findById", (id) => singleQuery(() => records.get(String(id))));
+  mock.method(Waiver, "findOne", (filter) => singleQuery(() => [...records.values()].find((w) => matches(w, filter))));
   mock.method(Waiver, "find", (filter = {}) => query([...records.values()].filter((w) => matches(w, filter))));
   mock.method(Waiver, "countDocuments", async (filter = {}) => [...records.values()].filter((w) => matches(w, filter)).length);
+  const updateRecord = (w, update, filter) => {
+    const positional = filter.additionalActivities?.$elemMatch ? w.additionalActivities.find(a => matches(a, filter.additionalActivities.$elemMatch)) : null;
+    for (const [path, value] of Object.entries(update.$set || {})) {
+      const parts = path.split(".");
+      const key = parts.pop();
+      let target = w;
+      for (const part of parts) {
+        if (part === "$") target = positional;
+        else target = target[part] ??= {};
+      }
+      target[key] = value;
+    }
+    for (const [path, value] of Object.entries(update.$push || {})) {
+      // MongoDB casts embedded IDs when persisting the document.
+      (w[path] ??= []).push(JSON.parse(JSON.stringify(value)));
+    }
+    return w;
+  };
+  mock.method(Waiver, "updateOne", async (filter, update) => {
+    const w = [...records.values()].find(w => matches(w, filter));
+    if (w) updateRecord(w, update, filter);
+    return { modifiedCount: w ? 1 : 0 };
+  });
   mock.method(Waiver, "findOneAndUpdate", (filter, update) => ({ lean: async () => {
-    const w = [...records.values()].find((w) => matches(w, filter));
-    if (!w) return null;
-    Object.assign(w, update.$set);
-    return structuredClone(w);
+    const w = [...records.values()].find(w => matches(w, filter));
+    return w ? structuredClone(updateRecord(w, update, filter)) : null;
+  } }));
+  const recoveries = [];
+  mock.method(WaiverRecovery, "create", async data => { const r = { ...data, usedAt: null }; recoveries.push(r); return r; });
+  mock.method(WaiverRecovery, "findOneAndUpdate", (filter, update) => ({ lean: async () => {
+    const r = recoveries.find(r => matches(r, filter));
+    return r ? structuredClone(updateRecord(r, update, filter)) : null;
   } }));
   mock.method(WaiverAuditEvent, "create", async (data) => ({
     ...data,
@@ -123,8 +168,9 @@ mock.method(User, "findOne", (filter) => ({
 }));
   const app = express();
   app.use(express.json({ limit: "12mb" }));
+  app.use("/api/public/recovery", recoveryRoutes({ jwtSecret: secret }));
   app.use("/api/public", publicRoutes({ jwtSecret: secret }));
   app.use("/api/reports", reportRoutes({ jwtSecret: secret }));
   app.use("/api/admin", adminRoutes({ jwtSecret: secret }));
-  return { app, records };
+  return { app, records, recoveries };
 }

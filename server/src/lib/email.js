@@ -182,3 +182,15 @@ export async function sendWaiverQrEmail({
 
   return { sent: true };
 }
+
+export async function sendRecoveryEmail({ to, code }) {
+  const { apiKey, from } = getResendConfig();
+  if (!apiKey || !from) return { sent: false };
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST", signal: AbortSignal.timeout(15000),
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ from, to: [to], subject: "Recuperar carta / Recover waiver", html: `<p>Código de recuperación / Recovery code (15 min):</p><p>${escapeHtml(code)}</p>` })
+  });
+  if (!response.ok) throw new Error("Recovery email failed");
+  return { sent: true };
+}
