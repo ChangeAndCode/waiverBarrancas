@@ -1,3 +1,4 @@
+import { activitySummaries } from "./additionalActivities.js";
 import { waiverDisplayId } from "./folio.js";
 import { getWaiverQrExpiresAt, isWaiverQrExpired } from "./waiverValidity.js";
 
@@ -10,7 +11,9 @@ export function visitQrResult(waiver, now = new Date()) {
   }
   return {
     valid: true,
-    accessAuthorized: waiver.status === "approved" && Boolean(waiver.assignedAt),
+    accessAuthorized: !(waiver.additionalActivities || []).length && waiver.status === "approved" && Boolean(waiver.assignedAt),
+    originalAccessAuthorized: waiver.status === "approved" && Boolean(waiver.assignedAt),
+    additionalActivities: activitySummaries(waiver),
     waiver: {
       id: waiverDisplayId(waiver), fullName: waiver.participant.fullName,
       attractionName: waiver.attractionName, birthDate: waiver.participant.birthDate,
