@@ -346,7 +346,7 @@ await WaiverAuditEvent.create({
     }
     // The waiver is already saved: an email failure must not encourage a duplicate registration.
     res.status(201).json({
-      folio: waiver.folio, waiverId: waiver.folio, token, qrUrl, emailSent,
+      folio: waiver.folio, waiverId: waiver._id.toString(), token, qrUrl, emailSent,
       signedAt: waiver.createdAt, status: waiver.status, visitDate: waiver.visitDate,
       assignedAt: null, expiresAt: null
     });

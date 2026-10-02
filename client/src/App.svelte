@@ -159,10 +159,18 @@
   let editAttractionDescription = "";
   let editStripeEnabled = false;
   let newUser = { name: "", email: "", password: "", role: "staff" };
+  let showCreateUserModal = false;
+  let createUserSuccess = "";
+  let createUserError = "";
+  let createUserBusy = false;
   let newAttraction = { name: "", code: "", description: "", waiverText: "", active: true, stripeEnabled: false };
+  let showCreateAttractionModal = false;
+  let createAttractionSuccess = "";
+  let createAttractionError = "";
+  let createAttractionBusy = false;
   let waiverEditorKey = 0;
   let showAdminLogin = false;
-  let adminTab = "new-attraction";
+  let adminTab = "attractions";
 
 let form = {
   visitDate: "",
@@ -1394,23 +1402,44 @@ async function reviewStaffWaiver(decision) {
 
   async function createAttraction() {
     message = "";
+    createAttractionError = "";
     if (!newAttraction.name?.trim() || !newAttraction.code?.trim()) {
-      message = "Nombre y código son obligatorios.";
+      createAttractionError = "Nombre y código son obligatorios.";
       return;
     }
     if (isWaiverTextEmpty(newAttraction.waiverText)) {
-      message = "El texto del waiver es obligatorio.";
+      createAttractionError = "El texto del waiver es obligatorio.";
       return;
     }
+    if (createAttractionBusy) return;
+    createAttractionBusy = true;
     try {
       await api("/admin/attractions", "POST", newAttraction);
+      createAttractionSuccess = `Atracción ${newAttraction.name.trim()} creada con éxito.`;
       newAttraction = { name: "", code: "", description: "", waiverText: "", active: true, stripeEnabled: false };
       waiverEditorKey += 1;
       await loadAdminData();
-      message = "Atracción creada.";
+      setTimeout(() => {
+        showCreateAttractionModal = false;
+        createAttractionSuccess = "";
+        createAttractionBusy = false;
+      }, 2000);
     } catch (e) {
-      message = e.message;
+      createAttractionError = e.message;
+      createAttractionBusy = false;
     }
+  }
+
+  function openCreateAttractionModal() {
+    createAttractionError = "";
+    createAttractionSuccess = "";
+    showCreateAttractionModal = true;
+  }
+
+  function closeCreateAttractionModal() {
+    if (createAttractionBusy) return;
+    showCreateAttractionModal = false;
+    createAttractionError = "";
   }
 
   async function toggleAttraction(item) {
@@ -1454,14 +1483,39 @@ async function reviewStaffWaiver(decision) {
 
   async function createUser() {
     message = "";
+    createUserError = "";
+    if (!newUser.name.trim() || !newUser.email.trim() || !newUser.password.trim() || !newUser.role) {
+      createUserError = "Completa todos los campos para crear el usuario.";
+      return;
+    }
+    if (createUserBusy) return;
+    createUserBusy = true;
     try {
       await api("/admin/users", "POST", newUser);
+      createUserSuccess = `Usuario ${newUser.name.trim()} creado con éxito.`;
       newUser = { name: "", email: "", password: "", role: "staff" };
       await loadAdminData();
-      message = "Usuario creado.";
+      setTimeout(() => {
+        showCreateUserModal = false;
+        createUserSuccess = "";
+        createUserBusy = false;
+      }, 2000);
     } catch (e) {
-      message = e.message;
+      createUserError = e.message;
+      createUserBusy = false;
     }
+  }
+
+  function openCreateUserModal() {
+    createUserError = "";
+    createUserSuccess = "";
+    showCreateUserModal = true;
+  }
+
+  function closeCreateUserModal() {
+    if (createUserBusy) return;
+    showCreateUserModal = false;
+    createUserError = "";
   }
 
   async function toggleUser(user) {
@@ -1792,9 +1846,6 @@ async function reviewStaffWaiver(decision) {
         {#if message}<p>{message}</p>{/if}
 
         <div class="tabs">
-          <button class:tab-active={adminTab === "new-attraction"} on:click={() => (adminTab = "new-attraction")}>
-            Nueva atracción
-          </button>
           <button class:tab-active={adminTab === "attractions"} on:click={() => (adminTab = "attractions")}>
             Atracciones
           </button>
@@ -1833,21 +1884,64 @@ async function reviewStaffWaiver(decision) {
         {/if}
 
         {#if adminTab === "attractions"}
-          <h3>Atracciones</h3>
+          <button type="button" class="create-attraction-trigger" on:click={openCreateAttractionModal}>Nueva atracción</button>
+
+          {#if showCreateAttractionModal}
+            <div
+              class="status-modal-backdrop"
+              role="presentation"
+              on:click={(event) => { if (event.target === event.currentTarget) closeCreateAttractionModal(); }}
+              on:keydown={(event) => { if (event.key === "Escape") closeCreateAttractionModal(); }}
+            >
+              <div class="status-modal create-attraction-modal" role="dialog" aria-modal="true" aria-labelledby="create-attraction-modal-title">
+                <div class="history-modal-header">
+                  <h3 id="create-attraction-modal-title">Nueva atracción</h3>
+                </div>
+                {#if createAttractionSuccess}
+                  <p class="delete-success">{createAttractionSuccess}</p>
+                {:else}
+                  <input bind:value={newAttraction.name} placeholder="Nombre" required />
+                  <input bind:value={newAttraction.code} placeholder="Código único" required />
+                  <input bind:value={newAttraction.description} placeholder="Descripción corta" />
+                  <label class="field-label" for="modalNewWaiverText">Carta responsiva</label>
+                  {#key waiverEditorKey}
+                    <WaiverTextEditor bind:value={newAttraction.waiverText} />
+                  {/key}
+                  <label class="checkbox-label admin-checkbox">
+                    <input type="checkbox" bind:checked={newAttraction.stripeEnabled} />
+                    Requiere pago en línea (Stripe) — eventos fuera del parque
+                  </label>
+                  {#if createAttractionError}<p class="bad">{createAttractionError}</p>{/if}
+                  <div class="history-modal-footer">
+                    <button type="button" on:click={createAttraction} disabled={createAttractionBusy || !newAttraction.name.trim() || !newAttraction.code.trim() || isWaiverTextEmpty(newAttraction.waiverText)}>
+                      {createAttractionBusy ? "Creando..." : "Crear atracción"}
+                    </button>
+                    <button type="button" class="secondary" on:click={closeCreateAttractionModal} disabled={createAttractionBusy}>Cancelar</button>
+                  </div>
+                {/if}
+              </div>
+            </div>
+          {/if}
+
+          <h3 class="admin-attractions-title">Atracciones</h3>
+          <div class="admin-table-header attraction-table-header"><span>Nombre</span><span>Estado</span><span>Tipo de pago</span><span>Acciones</span></div>
           {#each adminAttractions as item}
-            <div class="item">
-              <p>
-                <b>{item.name}</b> ({item.code}) - {item.active ? "Activa" : "Inactiva"}
+            <div class="item admin-data-row">
+              <div class="admin-attraction-name"><b>{item.name}</b> <span>({item.code})</span></div>
+              <div class="admin-attraction-status">{item.active ? "Activa" : "Inactiva"}</div>
+              <div class="admin-attraction-payment">{item.stripeEnabled ? "Pago Stripe" : "Sin pago en línea"}</div>
+                <!-- legacy combined attraction text removed
                 {#if item.stripeEnabled}
                   · Pago Stripe
                 {:else}
                   · Sin pago en línea
-                {/if}
-              </p>
+                {/if} -->
               <div class="inline-actions">
-                <button on:click={() => startEditAttraction(item)}>Editar texto</button>
-                <button on:click={() => toggleAttraction(item)}>
-                  {item.active ? "Desactivar" : "Activar"}
+                <button type="button" class="icon-button status-edit-button" title="Editar texto" aria-label={`Editar texto de ${item.name}`} on:click={() => startEditAttraction(item)}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 17.5-.8 3.3 3.3-.8L18.8 7.7a2.8 2.8 0 0 0-4-4L2.5 16Z"></path><path d="m13.8 5.8 4.4 4.4"></path></svg>
+                </button>
+                <button type="button" class:activate-icon-button={!item.active} class:deactivate-icon-button={item.active} class="icon-button" title={item.active ? "Desactivar" : "Activar"} aria-label={`${item.active ? "Desactivar" : "Activar"} ${item.name}`} on:click={() => toggleAttraction(item)}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9"></path><path d="M6.4 6.4a8 8 0 1 0 11.2 0"></path></svg>
                 </button>
               </div>
             </div>
@@ -1873,6 +1967,9 @@ async function reviewStaffWaiver(decision) {
         {/if}
 
         {#if adminTab === "users"}
+          <button type="button" class="create-user-trigger" on:click={openCreateUserModal}>Crear usuario</button>
+          <!-- El formulario de alta se muestra en un modal. -->
+          <!--
           <h3>Crear usuario</h3>
           <input bind:value={newUser.name} placeholder="Nombre" />
           <input bind:value={newUser.email} placeholder="Correo electrónico" />
@@ -1881,13 +1978,52 @@ async function reviewStaffWaiver(decision) {
             <option value="staff">staff</option>
             <option value="admin">admin</option>
           </select>
-          <button on:click={createUser}>Crear usuario</button>
+          <button on:click={createUser}>Crear usuario</button> -->
 
-          <h3>Usuarios</h3>
+          {#if showCreateUserModal}
+            <div
+              class="status-modal-backdrop"
+              role="presentation"
+              on:click={(event) => { if (event.target === event.currentTarget) closeCreateUserModal(); }}
+              on:keydown={(event) => { if (event.key === "Escape") closeCreateUserModal(); }}
+            >
+              <div class="status-modal create-user-modal" role="dialog" aria-modal="true" aria-labelledby="create-user-modal-title">
+                <div class="history-modal-header">
+                  <h3 id="create-user-modal-title">Crear usuario</h3>
+                </div>
+                {#if createUserSuccess}
+                  <p class="delete-success">{createUserSuccess}</p>
+                {:else}
+                  <input bind:value={newUser.name} placeholder="Nombre" required />
+                  <input bind:value={newUser.email} type="email" placeholder="Correo electrónico" required />
+                  <input bind:value={newUser.password} type="password" placeholder="Contraseña" required />
+                  <select bind:value={newUser.role} required>
+                    <option value="staff">staff</option>
+                    <option value="admin">admin</option>
+                  </select>
+                  {#if createUserError}<p class="bad">{createUserError}</p>{/if}
+                  <div class="history-modal-footer">
+                    <button type="button" on:click={createUser} disabled={createUserBusy || !newUser.name.trim() || !newUser.email.trim() || !newUser.password.trim()}>
+                      {createUserBusy ? "Creando..." : "Crear usuario"}
+                    </button>
+                    <button type="button" class="secondary" on:click={closeCreateUserModal} disabled={createUserBusy}>Cancelar</button>
+                  </div>
+                {/if}
+              </div>
+            </div>
+          {/if}
+
+          <h3 class="admin-users-title">Usuarios</h3>
+          <div class="admin-table-header user-table-header"><span>Usuario</span><span>Correo</span><span>Rol</span><span>Status</span><span>Acciones</span></div>
           {#each adminUsers as user}
-            <div class="item">
-              <p>{user.name} ({user.email}) - {user.role} - {user.active ? "Activo" : "Inactivo"}</p>
-              <button on:click={() => toggleUser(user)}>{user.active ? "Desactivar" : "Activar"}</button>
+            <div class="item admin-data-row admin-user-row">
+              <div class="admin-user-name">{user.name}</div>
+              <div class="admin-user-email">{user.email}</div>
+              <div class="admin-user-role">{user.role}</div>
+              <div class="admin-user-status">{user.active ? "Activo" : "Inactivo"}</div>
+              <button type="button" class:activate-icon-button={!user.active} class:deactivate-icon-button={user.active} class="icon-button" title={user.active ? "Desactivar" : "Activar"} aria-label={`${user.active ? "Desactivar" : "Activar"} ${user.name}`} on:click={() => toggleUser(user)}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9"></path><path d="M6.4 6.4a8 8 0 1 0 11.2 0"></path></svg>
+              </button>
             </div>
           {/each}
         {/if}
@@ -1954,9 +2090,7 @@ async function reviewStaffWaiver(decision) {
                   <th>Estado</th>
                   <th>QR validado (staff)</th>
                   <th>Fecha registro</th>
-                  <th>Expediente</th>
-                  <th>Historial</th>
-                  <th>Actualizar estado</th>
+                  <th>Acciones</th>
                 </tr>
               </thead>
               <tbody>
@@ -1973,7 +2107,7 @@ async function reviewStaffWaiver(decision) {
                     <td>{statusLabel(row.status)}{#if row.visitDate}<br />Visita: {row.visitDate}<br />Horario: {parkDateTimeLabel(row.assignedAt)}{/if}</td>
                     <td>{row.qrConsumedAt ? new Date(row.qrConsumedAt).toLocaleString("es-MX") : "—"}</td>
                     <td>{new Date(row.createdAt).toLocaleString()}</td>
-                    <td>
+                    <td class="report-actions-cell">
                       <button
                         type="button"
                         class="icon-button history-icon-button"
@@ -1987,8 +2121,6 @@ async function reviewStaffWaiver(decision) {
                           <path d="M2.5 9h18"></path>
                         </svg>
                       </button>
-                    </td>
-                    <td>
                       <button
                         type="button"
                         class="icon-button history-icon-button"
@@ -2002,8 +2134,6 @@ async function reviewStaffWaiver(decision) {
                           <path d="m16 16 5 5"></path>
                         </svg>
                       </button>
-                    </td>
-                    <td>
                       <button
                         type="button"
                         class="icon-button status-edit-button"
@@ -2582,7 +2712,6 @@ async function reviewStaffWaiver(decision) {
     padding: 16px;
     margin-top: 16px;
     display: grid;
-    gap: 10px;
     border: 1px solid #e3d7c4;
     box-shadow: 0 8px 18px rgba(31, 74, 59, 0.08);
   }
@@ -2987,47 +3116,30 @@ async function reviewStaffWaiver(decision) {
     color: #1f4a3b;
     font-weight: 700;
   }
-  .report-table th:nth-last-child(3),
-  .report-table td:nth-last-child(3) {
-    position: sticky;
-    right: 174px;
-    z-index: 2;
-    width: 82px;
-    min-width: 82px;
-    background: #fff;
-    box-shadow: -5px 0 8px rgba(31, 74, 59, 0.08);
-  }
-  .report-table th:nth-last-child(3) {
-    background: #f0e6d4;
-    z-index: 4;
-  }
-  .report-table th:nth-last-child(2),
-  .report-table td:nth-last-child(2) {
-    position: sticky;
-    right: 92px;
-    z-index: 3;
-    width: 82px;
-    min-width: 82px;
-    background: #fff;
-    box-shadow: -5px 0 8px rgba(31, 74, 59, 0.08);
-  }
-  .report-table th:nth-last-child(2) {
-    background: #f0e6d4;
-    z-index: 5;
-  }
   .report-table th:last-child,
   .report-table td:last-child {
     position: sticky;
     right: 0;
     z-index: 4;
-    width: 92px;
-    min-width: 92px;
+    width: 112px;
+    min-width: 112px;
     background: #fff;
     box-shadow: -5px 0 8px rgba(31, 74, 59, 0.12);
   }
   .report-table th:last-child {
     background: #f0e6d4;
     z-index: 6;
+  }
+  .report-actions-cell {
+    display: grid;
+    grid-template-columns: repeat(2, 42px);
+    justify-content: center;
+    gap: 8px;
+    white-space: normal;
+    text-align: center !important;
+  }
+  .report-table th:last-child {
+    text-align: center;
   }
   .pager {
     width: 100%;
@@ -3098,6 +3210,20 @@ async function reviewStaffWaiver(decision) {
   .tabs button.tab-active {
     background: #1f4a3b;
     color: #fff;
+  }
+  .create-user-trigger {
+    margin-top: 24px;
+    margin-bottom: 12px;
+  }
+  .create-attraction-trigger {
+    margin-top: 24px;
+    margin-bottom: 12px;
+  }
+  .admin-users-title {
+    margin: 12px 0;
+  }
+  .admin-attractions-title {
+    margin: 12px 0;
   }
   .admin-pill {
     display: inline-flex;
@@ -3215,6 +3341,128 @@ async function reviewStaffWaiver(decision) {
     background: #1976d2;
     color: #fff;
     border-color: #125da5;
+  }
+  .activate-icon-button,
+  .deactivate-icon-button {
+    background: #fff;
+    color: #000;
+    border: 1px solid #c9c9c9;
+  }
+  .activate-icon-button:hover,
+  .activate-icon-button:focus-visible {
+    background: #1f4a3b;
+    color: #fff;
+    border-color: #1f4a3b;
+  }
+  .deactivate-icon-button:hover,
+  .deactivate-icon-button:focus-visible {
+    background: #b42318;
+    color: #fff;
+    border-color: #8f1d14;
+  }
+  .admin-data-row {
+    display: grid;
+    grid-template-columns: minmax(300px, 1fr) auto;
+    align-items: center;
+    gap: 18px;
+    margin: 0;
+    padding: 14px 12px;
+    min-height: 72px;
+    width: 100%;
+    box-sizing: border-box;
+    border: 0;
+    background: #fff;
+  }
+  .admin-data-row.item {
+    border-bottom: 0;
+  }
+  .admin-table-header {
+    display: grid;
+    align-items: center;
+    gap: 18px;
+    padding: 14px 12px;
+    width: 100%;
+    box-sizing: border-box;
+    background: #f0e6d4;
+    color: #1f4a3b;
+    border: 1px solid #e3d7c4;
+    border-radius: 8px 8px 0 0;
+    font-weight: 700;
+  }
+  .attraction-table-header,
+  .admin-data-row:not(.admin-user-row) {
+    grid-template-columns: minmax(0, 1fr) 140px 160px 112px;
+  }
+  .user-table-header,
+  .admin-user-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) 90px 100px 112px;
+  }
+  .admin-user-row > div {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .user-table-header span:nth-child(3),
+  .user-table-header span:nth-child(4),
+  .admin-user-role,
+  .admin-user-status {
+    text-align: center;
+  }
+  .admin-user-row > .icon-button {
+    justify-self: center;
+  }
+  .admin-table-header span:last-child {
+    text-align: center;
+  }
+  .attraction-table-header span:nth-child(2),
+  .attraction-table-header span:nth-child(3),
+  .admin-attraction-status,
+  .admin-attraction-payment {
+    text-align: center;
+  }
+  .attraction-table-header span:first-child,
+  .admin-attraction-name {
+    text-align: left;
+  }
+  .admin-data-row:not(.admin-user-row) .inline-actions {
+    justify-self: end;
+  }
+  .attraction-table-header span:last-child {
+    justify-self: stretch;
+    text-align: center;
+  }
+  .admin-table-header + .admin-data-row {
+    border-top: 0;
+  }
+  .admin-data-row .inline-actions {
+    justify-content: flex-end;
+    min-width: 112px;
+    width: 112px;
+    box-sizing: border-box;
+  }
+  .admin-data-row:first-of-type {
+    border-top: 0;
+    border-radius: 0;
+  }
+  .admin-data-row:last-of-type {
+    border-radius: 0;
+  }
+  .admin-data-row:hover {
+    background: #fbf8f1;
+  }
+  .admin-data-row .icon-button {
+    flex: 0 0 42px;
+  }
+  @media (max-width: 620px) {
+    .admin-table-header {
+      display: none;
+    }
+    .admin-data-row {
+      grid-template-columns: 1fr;
+      align-items: start;
+    }
+    .admin-data-row .inline-actions {
+      justify-content: flex-start;
+    }
   }
   .delete-icon-button {
     background: #fff;
