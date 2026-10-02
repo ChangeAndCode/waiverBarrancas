@@ -39,20 +39,17 @@ export function parkDateTime(day, time = "00:00") {
 }
 
 export function canRegisterVisit(day, now = new Date()) {
-  const startsAt = parkDateTime(day);
-  return Boolean(startsAt && startsAt.getTime() - now.getTime() >= DAY_MS);
+  return Boolean(parkDateTime(day) && day >= parkDate(now));
 }
 
 export function earliestVisitDate(now = new Date()) {
-  let day = parkDate(new Date(now.getTime() + DAY_MS));
-  if (!canRegisterVisit(day, now)) day = addCalendarDays(day, 1);
-  return day;
+  return parkDate(now);
 }
 
-export function visitQrExpiresAt(assignedAt) {
-  if (!assignedAt) return null;
-  const assigned = new Date(assignedAt);
+export function visitQrExpiresAt(scheduleAssignedAt) {
+  if (!scheduleAssignedAt) return null;
+  const assigned = new Date(scheduleAssignedAt);
   if (!Number.isFinite(assigned.getTime())) return null;
-  // Exclusive boundary: midnight after the entire following calendar day.
-  return parkDateTime(addCalendarDays(parkDate(assigned), 2));
+  // Exclusive boundary: midnight following the real assignment day.
+  return parkDateTime(addCalendarDays(parkDate(assigned), 1));
 }

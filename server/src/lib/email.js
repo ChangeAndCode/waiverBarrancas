@@ -25,7 +25,7 @@ const EMAIL_COPY = {
     date: "Fecha",
     showQr: "Presenta este código QR al ingresar:",
     qrAlt: "QR de la carta responsiva",
-    notice: "Pendiente de validación. Completar la carta y obtener este QR no garantiza el acceso. Staff validará la carta y asignará un horario general para la visita según disponibilidad. El QR será vigente hasta terminar el día siguiente del horario asignado, en la zona horaria del parque.",
+    notice: "Pendiente de validación. Completar la carta y obtener este QR no garantiza el acceso. Staff validará la carta y asignará un horario general para la visita según disponibilidad. El QR se activa con la primera asignación efectiva de Staff y vence a las 00:00 del día siguiente a esa asignación, en America/Chihuahua, independientemente del horario programado.",
     visitDate: "Día de visita",
     viewLink: "Ver enlace de validación",
     footer:
@@ -41,7 +41,7 @@ const EMAIL_COPY = {
     date: "Date",
     showQr: "Show this QR code when you arrive:",
     qrAlt: "Waiver QR code",
-    notice: "Pending validation. Completing the waiver and obtaining this QR does not guarantee admission. Staff will validate the waiver and assign one time for your visit, subject to availability. The QR will remain valid until the end of the following day in the park’s time zone.",
+    notice: "Pending validation. Completing the waiver and obtaining this QR does not guarantee admission. Staff will validate the waiver and assign one time for your visit, subject to availability. The QR activates at Staff’s first effective assignment and expires at 00:00 the next day in America/Chihuahua, regardless of the scheduled visit time.",
     visitDate: "Visit date",
     viewLink: "Open validation link",
     footer:

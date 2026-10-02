@@ -1,6 +1,6 @@
 import { activitySummaries } from "./additionalActivities.js";
 import { waiverDisplayId } from "./folio.js";
-import { getWaiverQrExpiresAt, isWaiverQrExpired } from "./waiverValidity.js";
+import { getWaiverQrExpiresAt, isWaiverQrExpired, originalAccessAuthorized } from "./waiverValidity.js";
 
 export function visitQrResult(waiver, now = new Date()) {
   const expiresAt = getWaiverQrExpiresAt(waiver);
@@ -11,14 +11,14 @@ export function visitQrResult(waiver, now = new Date()) {
   }
   return {
     valid: true,
-    accessAuthorized: !(waiver.additionalActivities || []).length && waiver.status === "approved" && Boolean(waiver.assignedAt),
-    originalAccessAuthorized: waiver.status === "approved" && Boolean(waiver.assignedAt),
-    additionalActivities: activitySummaries(waiver),
+    accessAuthorized: !(waiver.additionalActivities || []).length && originalAccessAuthorized(waiver, now),
+    originalAccessAuthorized: originalAccessAuthorized(waiver, now),
+    additionalActivities: activitySummaries(waiver, now),
     waiver: {
       id: waiverDisplayId(waiver), fullName: waiver.participant.fullName,
       attractionName: waiver.attractionName, birthDate: waiver.participant.birthDate,
       signedAt: waiver.createdAt, status: waiver.status, visitDate: waiver.visitDate,
-      assignedAt: waiver.assignedAt, validatedAt: waiver.validatedAt, expiresAt
+      assignedAt: waiver.assignedAt, scheduleAssignedAt: waiver.scheduleAssignedAt, validatedAt: waiver.validatedAt, expiresAt
     }
   };
 }

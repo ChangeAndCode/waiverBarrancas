@@ -24,6 +24,8 @@ test("email uses a locally generated PNG with the exact QR link and conditional-
   const body = bodies[0];
   assert.match(body.html, /Pendiente de validación/);
   assert.match(body.html, /no garantiza el acceso/);
+  assert.match(body.html, /00:00 del día siguiente a esa asignación/);
+  assert.match(bodies[1].html, /00:00 the next day/);
   assert.match(body.html, /&lt;Visitante&gt;/);
   assert.match(body.html, /2026-12-31/);
   assert.match(body.html, /cid:waiver-qr/);

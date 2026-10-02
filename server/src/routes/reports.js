@@ -5,7 +5,7 @@ import { Waiver } from "../models/Waiver.js";
 import { verifyWaiverToken } from "../lib/token.js";
 import { nowMs, perfLog } from "../lib/perf.js";
 import { waiverDisplayId } from "../lib/folio.js";
-import { getWaiverQrExpiresAt, isWaiverQrExpired } from "../lib/waiverValidity.js";
+import { getWaiverQrExpiresAt, isWaiverQrExpired, qrWriteGuard } from "../lib/waiverValidity.js";
 import { WaiverAuditEvent } from "../models/WaiverAuditEvent.js";
 
 function mapStaffWaiver(waiver) {
@@ -39,7 +39,7 @@ function mapStaffWaiver(waiver) {
     review: waiver.review || null
   };
 }
-import { parkDateTime } from "../../../shared/visitSchedule.js";
+import { parkDateTime, visitQrExpiresAt, PARK_TIME_ZONE } from "../../../shared/visitSchedule.js";
 import { visitQrResult } from "../lib/visitQr.js";
 
 function staffVisitResult(waiver) {
@@ -86,6 +86,9 @@ export function reportRoutes({ jwtSecret }) {
       return res.status(404).json({ error: "Waiver no encontrado o revocado." });
     }
 
+    if (isWaiverQrExpired(waiver)) return res.status(409).json({ error: "Carta vencida." });
+    if (waiver.visitDate && decision === "approved" && !waiver.assignedAt) return res.status(409).json({ error: "Valida la visita asignando su horario general." });
+
     waiver.review = {
       decision,
       comment,
@@ -93,7 +96,8 @@ export function reportRoutes({ jwtSecret }) {
       reviewedAt: new Date()
     };
     waiver.status = decision;
-    await waiver.save();
+    const updated = await Waiver.findOneAndUpdate({ _id: waiver._id, status: { $in: ["pending", "signed"] }, ...qrWriteGuard(waiver) }, { $set: { review: waiver.review, status: decision } }, { new: true }).lean();
+    if (!updated) return res.status(409).json({ error: "Carta modificada o vencida." });
     await WaiverAuditEvent.create({
       waiverId: waiver._id,
       userId: req.user._id,
@@ -158,9 +162,18 @@ export function reportRoutes({ jwtSecret }) {
         return res.status(400).json({ error: "La atracción no pertenece al waiver." });
       }
 
+      if (isWaiverQrExpired(waiver)) return res.status(409).json({ error: "Carta vencida." });
+      if (waiver.visitDate && (!waiver.assignedAt || waiver.status !== "approved")) return res.status(409).json({ error: "Valida primero la carta y asigna el horario general." });
+      if (!parkDateTime(date, time)) return res.status(400).json({ error: "Fecha u hora inválida." });
       const attractionName = waiver.attractionName;
-      waiver.schedule = { date, group, time, attractionId, attractionName, assignedBy: req.user._id, assignedAt: new Date() };
-      await waiver.save();
+      const schedule = { date, group, time, attractionId, attractionName, assignedBy: req.user._id, assignedAt: new Date() };
+      const changes = { schedule };
+      // New visits keep the displayed general time aligned with the edited schedule.
+      // Historical visits retain assignedAt because it is their former expiry reference.
+      if (waiver.scheduleAssignedAt) changes.assignedAt = parkDateTime(date, time);
+      const updated = await Waiver.findOneAndUpdate({ _id: waiver._id, status: waiver.status, assignedAt: waiver.assignedAt, ...qrWriteGuard(waiver) }, { $set: changes }, { new: true }).lean();
+      if (!updated) return res.status(409).json({ error: "Carta modificada o vencida." });
+      waiver.schedule = updated.schedule;
       await WaiverAuditEvent.create({
         waiverId: waiver._id,
         userId: req.user._id,
@@ -193,7 +206,7 @@ export function reportRoutes({ jwtSecret }) {
       if (!waiver || ["revoked", "rejected"].includes(waiver.status)) {
         return res.status(404).json({ error: "Waiver no encontrado o no disponible." });
       }
-      if (waiver.visitDate && isWaiverQrExpired(waiver)) return res.status(409).json({ error: "Carta vencida." });
+      if (isWaiverQrExpired(waiver)) return res.status(409).json({ error: "Carta vencida." });
       if (waiver.status !== "approved") {
         return res.status(409).json({ error: "El waiver debe estar aprobado para imprimir el ticket." });
       }
@@ -253,13 +266,6 @@ router.get("/validate/:token", requirePermissions("waiver.scan"), async (req, re
       return res.json(staffVisitResult(waiver));
     }
 
-      if (["pending", "signed"].includes(waiver.status)) {
-        return res.json({
-          valid: true,
-          requiresReview: true,
-          waiver: mapStaffWaiver({ ...waiver, status: "pending" })
-        });
-      }
     // A partir de aquí estamos en el flujo LEGACY,
     // porque el waiver no tiene visitDate.
 
@@ -274,9 +280,13 @@ router.get("/validate/:token", requirePermissions("waiver.scan"), async (req, re
       });
     }
 
-        if (false) {
-          return res.status(404).json({ valid: false, error: "Waiver inválido o revocado." });
-        }
+      if (["pending", "signed"].includes(waiver.status)) {
+        return res.json({
+          valid: true,
+          requiresReview: true,
+          waiver: mapStaffWaiver({ ...waiver, status: "pending" })
+        });
+      }
     // Los QR legacy conservan su comportamiento de un solo uso.
     if (waiver.qrConsumedAt) {
       return res.json({
@@ -294,7 +304,7 @@ router.get("/validate/:token", requirePermissions("waiver.scan"), async (req, re
       {
         _id: waiverId,
         status: { $in: ["approved", "signed"] },
-        qrConsumedAt: null
+        qrConsumedAt: null, ...qrWriteGuard(waiver)
       },
       {
         $set: {
@@ -326,6 +336,9 @@ router.get("/validate/:token", requirePermissions("waiver.scan"), async (req, re
         });
       }
 
+      if (isWaiverQrExpired(again)) return res.json({ valid: false, reason: "qr_expired",
+        expiresAt: getWaiverQrExpiresAt(again), signedAt: again.createdAt,
+        fullName: again.participant.fullName, attractionName: again.attractionName });
       return res.json({
         valid: false,
         reason: "qr_already_used",
@@ -383,6 +396,7 @@ router.post("/validate/:token", requirePermissions("waiver.scan"), async (req, r
       });
     }
 
+    if (isWaiverQrExpired(waiver) || waiver.assignedAt || waiver.scheduleAssignedAt || waiver.qrExpiresAt) return res.status(409).json({ error: "La vigencia no puede reactivarse." });
     if (!waiver.visitDate || !["pending", "signed"].includes(waiver.status)) {
       return res.status(409).json({
         error: "La carta ya fue validada o no pertenece al flujo de visitas."
@@ -405,16 +419,20 @@ router.post("/validate/:token", requirePermissions("waiver.scan"), async (req, r
     }
 
     const reviewedAt = new Date();
+    const qrExpiresAt = visitQrExpiresAt(reviewedAt);
 
     const updated = await Waiver.findOneAndUpdate(
       {
         _id: waiver._id,
         status: { $in: ["pending", "signed"] },
-        visitDate: waiver.visitDate
+        visitDate: waiver.visitDate, assignedAt: null, ...qrWriteGuard(waiver),
+        $expr: { $gt: [{ $literal: qrExpiresAt }, "$$NOW"] }
       },
       {
         $set: {
           assignedAt,
+          scheduleAssignedAt: reviewedAt,
+          qrExpiresAt,
           status: "approved",
           validatedAt: reviewedAt,
           validatedBy: req.user._id,
@@ -441,10 +459,17 @@ router.post("/validate/:token", requirePermissions("waiver.scan"), async (req, r
       action: "approved",
       metadata: {
         source: "staff_visit_validation",
-        assignedAt
+        scheduleAssignedAt: reviewedAt, qrExpiresAt, timezone: PARK_TIME_ZONE,
+        date: waiver.visitDate, time: req.body.assignedTime, assignedAt
       }
     });
 
+    await WaiverAuditEvent.create({
+      waiverId: updated._id, userId: req.user._id, userRole: req.user.role,
+      action: "schedule_assigned",
+      metadata: { scheduleAssignedAt: reviewedAt, qrExpiresAt, timezone: PARK_TIME_ZONE,
+        date: waiver.visitDate, time: req.body.assignedTime, assignedAt }
+    });
     return res.json(staffVisitResult(updated));
   } catch (error) {
     console.error("Validación de visita:", error.message);
@@ -496,6 +521,8 @@ router.post("/validate/:token", requirePermissions("waiver.scan"), async (req, r
       status: w.status === "signed" ? "pending" : w.status,
       visitDate: w.visitDate,
       assignedAt: w.assignedAt,
+      scheduleAssignedAt: w.scheduleAssignedAt,
+      qrExpiresAt: getWaiverQrExpiresAt(w),
       createdAt: w.createdAt
     }))
   });

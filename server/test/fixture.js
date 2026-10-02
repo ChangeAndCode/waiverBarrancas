@@ -12,7 +12,7 @@ import { reportRoutes } from "../src/routes/reports.js";
 import { adminRoutes } from "../src/routes/admin.js";
 import { signAuthToken } from "../src/lib/auth.js";
 import { PARK_ATTRACTIONS } from "../src/lib/parkAttractions.js";
-import { earliestVisitDate } from "../../shared/visitSchedule.js";
+import { earliestVisitDate, parkDate, parkDateTime } from "../../shared/visitSchedule.js";
 import { WaiverAuditEvent } from "../src/models/WaiverAuditEvent.js";
 import { User } from "../src/models/User.js";
 
@@ -55,6 +55,8 @@ export function payload() {
 }
 
 export function testApp(mock) {
+  // Keep route tests at 07:00 park time so same-day future slots are deterministic.
+  mock.timers.enable({ apis: ["Date"], now: parkDateTime(parkDate(), "07:00").getTime() });
   const records = new Map();
   let seq = 0;
   const valuesAt = (obj, path) => {
@@ -63,6 +65,7 @@ export function testApp(mock) {
     return valuesAt(obj?.[path[0]], path.slice(1));
   };
   const matches = (w, filter) => Object.entries(filter).every(([key, value]) => {
+    if (key === "$expr") return new Date(value.$gt[0].$literal) > new Date();
     const values = valuesAt(w, key.split("."));
     if (value === null) return values.every(v => v == null);
     if (value && typeof value === "object") {
@@ -139,11 +142,12 @@ export function testApp(mock) {
     const r = recoveries.find(r => matches(r, filter));
     return r ? structuredClone(updateRecord(r, update, filter)) : null;
   } }));
-  mock.method(WaiverAuditEvent, "create", async (data) => ({
-    ...data,
-    _id: new mongoose.Types.ObjectId(),
-    createdAt: new Date()
-  }));
+  const events = [];
+  mock.method(WaiverAuditEvent, "create", async (data) => {
+    const event = { ...data, _id: new mongoose.Types.ObjectId(), createdAt: new Date() };
+    events.push(event);
+    return event;
+  });
 mock.method(User, "findOne", (filter) => ({
   select() {
     return this;
@@ -172,5 +176,5 @@ mock.method(User, "findOne", (filter) => ({
   app.use("/api/public", publicRoutes({ jwtSecret: secret }));
   app.use("/api/reports", reportRoutes({ jwtSecret: secret }));
   app.use("/api/admin", adminRoutes({ jwtSecret: secret }));
-  return { app, records, recoveries };
+  return { app, records, recoveries, events };
 }
