@@ -82,6 +82,48 @@
   let checkData = null;
   let paymentSuccessInFlight = false;
 
+  let recoveryEmail = "", recoveryCode = "", recoverySession = "", recoveryWaivers = [], recoverySelected = "", recoveryAttraction = "", recoveryQr = "", recoveryNotice = "", recoveryBusy = false;
+  let recoveryCodeSent = false;
+  let additionalDrafts = {};
+  async function recoveryApi(endpoint, method = "GET", body) {
+    const response = await fetch(`${API_BASE}/public/recovery${endpoint}`, { method,
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${recoverySession}` },
+      body: body ? JSON.stringify(body) : undefined });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "No se pudo continuar.");
+    return data;
+  }
+  async function recover(step) {
+    recoveryBusy = true; recoveryNotice = "";
+    try {
+      if (step === "request") {
+        await recoveryApi("/request", "POST", { email: recoveryEmail });
+        recoveryCodeSent = true;
+        recoverySession = ""; recoveryWaivers = []; recoverySelected = ""; recoveryNotice = L.recoverySent;
+      } else if (step === "verify") {
+        const result = await recoveryApi("/verify", "POST", { code: recoveryCode });
+        recoverySession = result.session;
+        recoveryWaivers = await recoveryApi("/waivers");
+        recoveryNotice = recoveryWaivers.length ? "" : L.recoveryEmpty;
+      } else {
+        const token = extractWaiverTokenFromText(recoveryQr);
+        await recoveryApi(`/waivers/${recoverySelected}/activities`, "POST", { attractionId: recoveryAttraction, qrToken: token, originalQrUrl: recoveryQr.includes("/check/") ? recoveryQr.trim() : undefined });
+        recoveryWaivers = await recoveryApi("/waivers");
+        recoveryAttraction = ""; recoveryNotice = L.additionalRequested;
+      }
+    } catch (error) { recoveryNotice = error.message; }
+    finally { recoveryBusy = false; }
+  }
+  async function reviewAdditional(activityId, decision) {
+    staffReviewBusy = true; staffScanError = "";
+    try {
+      await api(`/reports/waivers/${staffScanResult.waiver.databaseId}/activities/${activityId}/review`, "POST", {
+        ...(additionalDrafts[activityId] || {}), decision, qrToken: staffQrToken
+      });
+      staffScanResult = await api(`/reports/validate/${encodeURIComponent(staffQrToken)}`);
+    } catch (error) { staffScanError = error.message; }
+    finally { staffReviewBusy = false; }
+  }
   let staffScanPaste = "";
   let staffQrToken = "";
   let staffScanResult = null;
@@ -602,9 +644,7 @@ let form = {
     window.location.reload();
   }
 
-  function fieldInvalid(key) {
-    return showFieldErrors && fieldErrors[key];
-  }
+  $: fieldInvalid = (key) => showFieldErrors && fieldErrors[key];
 
   async function scrollToFirstInvalidField() {
     await tick();
@@ -612,7 +652,7 @@ let form = {
     if (!target) return;
     target.scrollIntoView({ behavior: "smooth", block: "center" });
     const focusable = target.querySelector(
-      "input:not([type=checkbox]):not([type=radio]), select, textarea"
+      "input, select, textarea"
     );
     if (focusable) focusable.focus({ preventScroll: true });
   }
@@ -983,7 +1023,12 @@ async function handleCancelledPayment() {
       staffScanResult = await api(`/reports/validate/${encodeURIComponent(token)}`);
       stopStaffScan();
       staffReviewComment = "";
-      staffSchedule = { date: "", group: "", time: "", attractionId: staffScanResult?.waiver?.attractionId || "" };
+      staffSchedule = {
+        date: staffScanResult?.waiver?.schedule?.date || staffScanResult?.waiver?.visitDate || "",
+        group: staffScanResult?.waiver?.schedule?.group || "",
+        time: staffScanResult?.waiver?.schedule?.time || "",
+        attractionId: staffScanResult?.waiver?.attractionId || ""
+      };
     } catch (e) {
       staffScanResult = null;
       staffScanError = e.message;
@@ -1036,6 +1081,7 @@ async function reviewStaffWaiver(decision) {
       ...staffScanResult,
       waiver: {
         ...staffScanResult.waiver,
+        status: result.waiver.status,
         review: result.waiver
       }
     };
@@ -1046,6 +1092,21 @@ async function reviewStaffWaiver(decision) {
     staffReviewBusy = false;
   }
 }
+
+  async function validateStaffVisit() {
+    if (!staffQrToken || staffReviewBusy) return;
+    staffReviewBusy = true;
+    staffScanError = "";
+    try {
+      staffScanResult = await api(`/reports/validate/${encodeURIComponent(staffQrToken)}`, "POST", {
+        assignedTime: staffSchedule.time
+      });
+    } catch (e) {
+      staffScanError = e.message;
+    } finally {
+      staffReviewBusy = false;
+    }
+  }
 
   async function assignStaffSchedule() {
     const databaseId = staffScanResult?.waiver?.databaseId;
@@ -1069,7 +1130,8 @@ async function reviewStaffWaiver(decision) {
     }
   }
 
-  async function printStaffTicket() {
+  async function printStaffTicket(activityId = "") {
+    if (typeof activityId !== "string") activityId = "";
     const databaseId = staffScanResult?.waiver?.databaseId;
     const qrToken = staffQrToken || extractWaiverTokenFromText(staffScanPaste);
     if (!databaseId || !qrToken) {
@@ -1079,9 +1141,12 @@ async function reviewStaffWaiver(decision) {
     staffTicketBusy = true;
     staffScanError = "";
     try {
-      const result = await api(`/reports/waivers/${databaseId}/ticket`, "POST", { qrToken });
+      const result = await api(activityId ? `/reports/waivers/${databaseId}/activities/${activityId}/ticket` : `/reports/waivers/${databaseId}/ticket`, "POST", { qrToken });
       const ticket = result.ticket;
-      const qrDataUrl = await QRCode.toDataURL(`${window.location.origin}/check/${ticket.qrToken}`);
+      for (const key of ["id", "fullName", "attractionName", "date", "time", "group", "cityState"]) {
+        ticket[key] = String(ticket[key] || "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+      }
+      const qrDataUrl = await QRCode.toDataURL(ticket.qrUrl || `${window.location.origin}/check/${ticket.qrToken}`);
       const printWindow = window.open("", "_blank", "width=600,height=800");
       if (!printWindow) throw new Error("El navegador bloqueó la ventana de impresión.");
       printWindow.document.write(`
@@ -1534,6 +1599,12 @@ async function reviewStaffWaiver(decision) {
           <p>{L.validityHelp}</p>
           {#if checkData.waiver.expiresAt}<p><b>Vence al iniciar:</b> {parkDateTimeLabel(checkData.waiver.expiresAt)} (hora del parque)</p>{/if}
         {/if}
+        {#if checkData.additionalActivities?.length}
+          <p>{L.originalActivity}: {checkData.originalAccessAuthorized ? L.activityAuthorized : L.activityUnauthorized}</p>
+          {#each checkData.additionalActivities as activity}
+            <p>{activity.attractionName}: {statusLabel(activity.status)} — {activity.accessAuthorized ? L.activityAuthorized : L.activityUnauthorized}</p>
+          {/each}
+        {/if}
         <p><b>Nombre:</b> {checkData.waiver.fullName}</p>
         <p><b>Atracción:</b> {checkData.waiver.attractionName}</p>
         <p><b>Fecha de firma:</b> {new Date(checkData.waiver.signedAt).toLocaleString()}</p>
@@ -1605,7 +1676,9 @@ async function reviewStaffWaiver(decision) {
 
       {#if staffScanResult?.valid}
         <div class="staff-scan-result">
+          <h3>{L.originalActivity}</h3>
           <p class="ok">{statusLabel(staffScanResult.waiver.status)}</p>
+          {#if staffScanResult.waiver.visitDate}<p>{staffScanResult.originalAccessAuthorized ? L.activityAuthorized : L.activityUnauthorized}</p>{/if}
           <p><b>Nombre:</b> {staffScanResult.waiver.fullName}</p>
           <p><b>Atracción:</b> {staffScanResult.waiver.attractionName}</p>
            <p><b>Correo:</b> {staffScanResult.waiver.participant?.email}</p>
@@ -1621,7 +1694,18 @@ async function reviewStaffWaiver(decision) {
              <p><b>Condición médica:</b> {staffScanResult.waiver.answers?.hasMedicalCondition ? "Sí" : "No"}</p>
              <p><b>Firma registrada:</b> {staffScanResult.waiver.hasSignature ? "Sí" : "No"}</p>
              <p><b>Firma de testigo:</b> {staffScanResult.waiver.witness?.hasSignature ? "Sí" : "No"}</p>
-           </details>
+          </details>
+          {#if staffScanResult.waiver.visitDate}
+            <p><b>Día de visita:</b> {staffScanResult.waiver.visitDate}</p>
+            <p><b>Horario general (Chihuahua):</b> {parkDateTimeLabel(staffScanResult.waiver.assignedAt)}</p>
+            {#if staffScanResult.waiver.status === "pending" || staffScanResult.waiver.status === "signed"}
+              <label class="field-label" for="staffVisitTime">Horario general de la visita</label>
+              <input id="staffVisitTime" type="time" bind:value={staffSchedule.time} />
+              <button type="button" on:click={validateStaffVisit} disabled={staffReviewBusy || !staffSchedule.time}>
+                {staffReviewBusy ? "Validando..." : "Validar carta y asignar horario general"}
+              </button>
+            {/if}
+          {/if}
           <div class="schedule-box">
             <h4>Asignar horario</h4>
             <label class="field-label" for="staffScheduleDate">Fecha</label>
@@ -1649,10 +1733,32 @@ async function reviewStaffWaiver(decision) {
             <label class="field-label" for="staffReviewComment">Comentario de revisión</label>
             <textarea id="staffReviewComment" bind:value={staffReviewComment} rows="3" maxlength="1000" placeholder="Comentario opcional para aprobar u obligatorio para rechazar"></textarea>
             <div class="inline-actions">
-              <button type="button" on:click={() => reviewStaffWaiver("approved")} disabled={staffReviewBusy}>Aprobar waiver</button>
+              {#if !staffScanResult.waiver.visitDate}
+                <button type="button" on:click={() => reviewStaffWaiver("approved")} disabled={staffReviewBusy}>Aprobar waiver</button>
+              {/if}
               <button type="button" class="secondary" on:click={() => reviewStaffWaiver("rejected")} disabled={staffReviewBusy}>Rechazar waiver</button>
             </div>
           {/if}
+          <h3>{L.additionalActivities}</h3>
+          {#each staffScanResult.additionalActivities || [] as activity}
+            <div class="schedule-box">
+              <h4>{activity.attractionName} — {statusLabel(activity.status)}</h4>
+              <p>{activity.accessAuthorized ? L.activityAuthorized : L.activityUnauthorized}</p>
+              {#if activity.review?.comment}<p>{activity.review.comment}</p>{/if}
+              {#if activity.status === "pending"}
+                {@const draft = additionalDrafts[activity.id] || { date: staffScanResult.waiver.visitDate, time: "", group: "", comment: "" }}
+                <label>{L.visitDate}<input type="date" value={draft.date} on:input={e => additionalDrafts = { ...additionalDrafts, [activity.id]: { ...draft, date: e.target.value } }} /></label>
+                <label>{L.activityTime}<input type="time" value={draft.time} on:input={e => additionalDrafts = { ...additionalDrafts, [activity.id]: { ...draft, time: e.target.value } }} /></label>
+                <label>{L.activityGroup}<input value={draft.group} on:input={e => additionalDrafts = { ...additionalDrafts, [activity.id]: { ...draft, group: e.target.value } }} /></label>
+                <label>{L.activityComment}<input maxlength="1000" value={draft.comment} on:input={e => additionalDrafts = { ...additionalDrafts, [activity.id]: { ...draft, comment: e.target.value } }} /></label>
+                <button disabled={staffReviewBusy} on:click={() => reviewAdditional(activity.id, "approved")}>{L.activityApprove}</button>
+                <button disabled={staffReviewBusy} on:click={() => reviewAdditional(activity.id, "rejected")}>{L.activityReject}</button>
+              {:else if activity.schedule}
+                <p>{activity.schedule.date} · {activity.schedule.time} · {activity.schedule.group}</p>
+              {/if}
+              {#if activity.accessAuthorized}<button disabled={staffTicketBusy} on:click={() => printStaffTicket(activity.id)}>{L.activityPrint}</button>{/if}
+            </div>
+          {/each}
           <p><b>Folio:</b> {staffScanResult.waiver.id}</p>
         </div>
       {:else if staffScanResult?.reason === "qr_expired"}
@@ -1857,7 +1963,9 @@ async function reviewStaffWaiver(decision) {
                 {#each adminReport.items as row}
                   <tr>
                     <td>{row.id}</td>
-                    <td>{row.attractionName}</td>
+                    <td>{row.attractionName}
+                      {#each row.additionalActivities || [] as a}<p>{a.attractionName} · {statusLabel(a.status)} · {a.schedule?.time || L.activityUnauthorized}</p>{/each}
+                    </td>
                     <td>{row.fullName}</td>
                     <td>{row.email}</td>
                     <td>{row.phone}</td>
@@ -2032,6 +2140,7 @@ async function reviewStaffWaiver(decision) {
                           {#if event.userId} — {event.userId.name} ({event.userId.role}){/if}
                         </p>
                         {#if event.comment}<p class="muted">Comentario: {event.comment}</p>{/if}
+                        {#if event.metadata?.activityId}<p>{L.additionalActivities}: {event.metadata.activityId}</p>{/if}
                       </div>
                     {/each}
                   </div>
@@ -2082,6 +2191,38 @@ async function reviewStaffWaiver(decision) {
     <section class="card waiver-form" style={`--field-error-hint: "${L.fieldRequired}"`}>
       <h2>{L.waiverTitle}</h2>
       <p><b>{L.noAdmissionGuarantee}</b></p>
+      <details class="card">
+        <summary>{L.recoveryTitle}</summary>
+        <div class="recovery-content">
+          <div class="recovery-step">
+            <label class="field-label">{L.recoveryEmail}<input type="email" bind:value={recoveryEmail} /></label>
+            <button type="button" disabled={recoveryBusy} on:click={() => recover("request")}>{L.recoverySend}</button>
+          </div>
+          {#if recoveryCodeSent}
+            <div class="recovery-step">
+              <label class="field-label">{L.recoveryCode}<input bind:value={recoveryCode} autocomplete="one-time-code" /></label>
+              <button type="button" disabled={recoveryBusy} on:click={() => recover("verify")}>{L.recoveryVerify}</button>
+            </div>
+          {/if}
+          {#if recoverySession}
+            <label>{L.recoveryChoose}<select bind:value={recoverySelected} on:change={() => { recoveryAttraction = ""; recoveryQr = ""; }}><option value="">—</option>
+              {#each recoveryWaivers as w}<option value={w.id}>{w.folio} · {w.fullName} · {w.visitDate} · {w.attractionName}</option>{/each}
+            </select></label>
+            {#if recoverySelected}
+              {@const selected = recoveryWaivers.find(w => w.id === recoverySelected)}
+              {#if selected}
+                {#if selected.qrUrl}<a href={selected.qrUrl}>{L.saveQrLink}</a>{:else}<label>{L.historicalQr}<input bind:value={recoveryQr} /></label>{/if}
+                <label>{L.attraction}<select bind:value={recoveryAttraction}><option value="">—</option>
+                  {#each attractions.filter(a => !selected.attractionIds.includes(a._id)) as a}<option value={a._id}>{a.name}</option>{/each}
+                </select></label>
+                <button type="button" disabled={recoveryBusy || !recoveryAttraction} on:click={() => recover("add")}>{L.additionalRequest}</button>
+                {#each selected.additionalActivities as a}<p>{a.attractionName} · {statusLabel(a.status)}</p>{/each}
+              {/if}
+            {/if}
+          {/if}
+          {#if recoveryNotice}<p role="status">{recoveryNotice}</p>{/if}
+        </div>
+      </details>
       <div class="field-group" class:field-invalid={fieldInvalid("visitDate")}>
         <label class="field-label" for="visitDate">{L.visitDate}</label>
         <input id="visitDate" type="date" bind:value={form.visitDate} min={earliestVisitDate()} aria-describedby="visitDateHelp" />
@@ -2462,6 +2603,31 @@ async function reviewStaffWaiver(decision) {
   .waiver-form {
     gap: 16px;
   }
+  .recovery-content,
+  .recovery-step {
+    display: grid;
+    gap: 12px;
+    min-width: 0;
+  }
+  .recovery-content {
+    margin-top: 12px;
+  }
+  .recovery-content label {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+    font-weight: 600;
+    color: #1f4a3b;
+  }
+  .recovery-content input,
+  .recovery-content select {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+  }
+  .recovery-content button {
+    min-height: 44px;
+  }
   .waiver-form .form-section {
     border: 1px solid #e3d7c4;
     border-radius: 10px;
@@ -2693,6 +2859,10 @@ async function reviewStaffWaiver(decision) {
     min-height: 44px;
   }
   @media (min-width: 600px) {
+    .recovery-step {
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: end;
+    }
     .form-grid-2 {
       grid-template-columns: 1fr 1fr;
     }
