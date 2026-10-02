@@ -9,7 +9,7 @@ import { WaiverAuditEvent } from '../models/WaiverAuditEvent.js';
 import { canSendEmails, sendRecoveryEmail } from '../lib/email.js';
 import { verifyWaiverToken } from '../lib/token.js';
 import { eligibleForAdditional, activitySummaries } from '../lib/additionalActivities.js';
-import { getWaiverQrExpiresAt } from '../lib/waiverValidity.js';
+import { getWaiverQrExpiresAt, qrWriteGuard } from '../lib/waiverValidity.js';
 import { waiverDisplayId } from '../lib/folio.js';
 
 const digest = value => createHash('sha256').update(value).digest('hex');
@@ -99,7 +99,7 @@ export function recoveryRoutes({ jwtSecret }) {
       if (!attraction) return res.status(400).json({ error: 'Actividad no disponible.' });
       const activity = { _id: new mongoose.Types.ObjectId(), attractionId: attraction._id, attractionName: attraction.name, status: 'pending', requestedAt: new Date() };
       const updated = await Waiver.findOneAndUpdate({
-        _id: waiver._id, ...emailFilter(req.recoveryEmail), status: waiver.status, assignedAt: waiver.assignedAt,
+        _id: waiver._id, ...emailFilter(req.recoveryEmail), status: waiver.status, assignedAt: waiver.assignedAt, ...qrWriteGuard(waiver),
         attractionId: { $ne: attractionId }, attractionIds: { $ne: attractionId }, 'additionalActivities.attractionId': { $ne: attractionId },
         qrToken: waiver.qrToken || null
       }, { $push: { additionalActivities: activity }, $set: { qrToken: originalToken, qrUrl } }, { new: true }).lean();

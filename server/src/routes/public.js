@@ -232,7 +232,7 @@ export function publicRoutes({ jwtSecret }) {
     }
 
     if (!canRegisterVisit(visitDate)) {
-      return res.status(400).json({ error: "Elige un día de visita con al menos 24 horas de anticipación al inicio de ese día (hora del parque)." });
+      return res.status(400).json({ error: "Elige hoy o un día futuro para tu visita (hora del parque)." });
     }
 
     const age = calculateAge(participant.birthDate);
@@ -348,7 +348,7 @@ await WaiverAuditEvent.create({
     res.status(201).json({
       folio: waiver.folio, waiverId: waiver._id.toString(), token, qrUrl, emailSent,
       signedAt: waiver.createdAt, status: waiver.status, visitDate: waiver.visitDate,
-      assignedAt: null, expiresAt: null
+      assignedAt: null, scheduleAssignedAt: null, expiresAt: null
     });
   });
 

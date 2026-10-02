@@ -5,7 +5,7 @@ import { Waiver } from '../models/Waiver.js';
 import { WaiverAuditEvent } from '../models/WaiverAuditEvent.js';
 import { verifyWaiverToken } from '../lib/token.js';
 import { eligibleForAdditional, additionalAuthorized } from '../lib/additionalActivities.js';
-import { getWaiverQrExpiresAt } from '../lib/waiverValidity.js';
+import { getWaiverQrExpiresAt, qrWriteGuard } from '../lib/waiverValidity.js';
 import { parkDateTime } from '../../../shared/visitSchedule.js';
 import { waiverDisplayId } from '../lib/folio.js';
 
@@ -44,7 +44,7 @@ export function additionalStaffRoutes({ jwtSecret }) {
         'additionalActivities.$.validatedAt': now, 'additionalActivities.$.validatedBy': req.user._id,
         'additionalActivities.$.schedule': { date, time, group: String(group).trim(), assignedAt: now, assignedBy: req.user._id }
       });
-      const updated = await Waiver.findOneAndUpdate({ _id: waiver._id, deletedAt: null, status: waiver.status, assignedAt: waiver.assignedAt,
+      const updated = await Waiver.findOneAndUpdate({ _id: waiver._id, deletedAt: null, status: waiver.status, assignedAt: waiver.assignedAt, ...qrWriteGuard(waiver),
         additionalActivities: { $elemMatch: { _id: activity._id, status: 'pending' } } }, { $set: changes }, { new: true }).lean();
       if (!updated) return res.status(409).json({ error: 'La carta cambió. Consulta nuevamente.' });
       await WaiverAuditEvent.create({ waiverId: waiver._id, userId: req.user._id, userRole: req.user.role, action: 'activity_reviewed', comment, metadata: { activityId: req.params.activityId, decision, date, time } });

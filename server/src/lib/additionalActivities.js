@@ -3,7 +3,7 @@ import { parkDate, parkDateTime } from '../../../shared/visitSchedule.js';
 
 export function eligibleForAdditional(waiver, now = new Date()) {
   return Boolean(waiver?.visitDate && !waiver.deletedAt &&
-    !['rejected', 'revoked'].includes(waiver.status) && !isWaiverQrExpired(waiver, now) &&
+    !['rejected', 'revoked'].includes(waiver.status) && (!waiver.scheduleAssignedAt || (waiver.status === 'approved' && waiver.validatedAt)) && !isWaiverQrExpired(waiver, now) &&
     (waiver.assignedAt || waiver.visitDate >= parkDate(now)));
 }
 export function additionalAuthorized(waiver, activity, now = new Date()) {
