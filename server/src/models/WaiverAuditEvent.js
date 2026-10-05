@@ -23,7 +23,7 @@ const waiverAuditEventSchema = new mongoose.Schema(
     action: {
       type: String,
       enum: [
-        "waiver_created", "activity_requested", "activity_reviewed",
+        "waiver_created", "activity_requested", "activity_reviewed", "weight_verified",
         "qr_generated",
         "qr_validated",
         "comment_added",

@@ -129,6 +129,8 @@
   let staffScanResult = null;
   let staffReviewComment = "";
   let staffSchedule = { date: "", group: "", time: "", attractionId: "" };
+  let staffWeightDraft = "";
+  let staffWeightComment = "";
   let staffScheduleBusy = false;
   let staffTicketBusy = false;
   let staffReviewBusy = false;
@@ -1138,6 +1140,20 @@ async function reviewStaffWaiver(decision) {
     }
   }
 
+  async function verifyStaffWeight() {
+    const databaseId = staffScanResult?.waiver?.databaseId;
+    if (!databaseId || !staffWeightDraft) return;
+    staffReviewBusy = true;
+    staffScanError = "";
+    try {
+      await api(`/reports/waivers/${databaseId}/weight-verification`, "POST", {
+        weight: Number(staffWeightDraft), comment: staffWeightComment, attractionId: staffSchedule.attractionId
+      });
+      staffScanResult = await api(`/reports/validate/${encodeURIComponent(staffQrToken)}`);
+    } catch (e) { staffScanError = e.message; }
+    finally { staffReviewBusy = false; }
+  }
+
   async function printStaffTicket(activityId = "") {
     if (typeof activityId !== "string") activityId = "";
     const databaseId = staffScanResult?.waiver?.databaseId;
@@ -1746,6 +1762,21 @@ async function reviewStaffWaiver(decision) {
              <p><b>Contacto de emergencia:</b> {staffScanResult.waiver.participant?.emergencyContactName} — {staffScanResult.waiver.participant?.emergencyContactPhone}</p>
              <p><b>Medicamentos:</b> {staffScanResult.waiver.participant?.medications}</p>
              <p><b>Condición médica:</b> {staffScanResult.waiver.answers?.hasMedicalCondition ? "Sí" : "No"}</p>
+             {#if staffScanResult.waiver.alerts?.length}
+               <div class="bad" role="alert"><b>Alertas de validación:</b>
+                 {#each staffScanResult.waiver.alerts as alert}<p>{alert.message}</p>{/each}
+               </div>
+             {:else}<p class="ok">Sin alertas automáticas.</p>{/if}
+             <div class="schedule-box">
+               <label class="field-label" for="staffWeight">Peso verificado (kg)</label>
+               <input id="staffWeight" type="number" min="1" max="300" step="0.1" bind:value={staffWeightDraft} />
+               <label class="field-label" for="staffWeightComment">Observaciones de verificación</label>
+               <textarea id="staffWeightComment" rows="2" bind:value={staffWeightComment}></textarea>
+               <button type="button" on:click={verifyStaffWeight} disabled={staffReviewBusy || !staffWeightDraft}>Registrar verificación</button>
+               {#if staffScanResult.waiver.safetyVerification?.weightStatus}
+                 <p><b>Resultado:</b> {staffScanResult.waiver.safetyVerification.weightStatus}</p>
+               {/if}
+             </div>
              <p><b>Firma registrada:</b> {staffScanResult.waiver.hasSignature ? "Sí" : "No"}</p>
              <p><b>Firma de testigo:</b> {staffScanResult.waiver.witness?.hasSignature ? "Sí" : "No"}</p>
           </details>
