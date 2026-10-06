@@ -1,3 +1,4 @@
+import { isWaiverQrExpired, qrWriteGuard } from "../lib/waiverValidity.js";
 import { activitySummaries } from "../lib/additionalActivities.js";
 import { Router } from "express";
 import bcrypt from "bcryptjs";
@@ -79,6 +80,8 @@ function mapWaiverRow(w) {
     status: w.status === "signed" ? "pending" : w.status,
     visitDate: w.visitDate || "",
     assignedAt: w.assignedAt || null,
+    scheduleAssignedAt: w.scheduleAssignedAt || null,
+    qrExpiresAt: w.qrExpiresAt || null,
     validatedAt: w.validatedAt || null,
     validatedBy: w.validatedBy || "",
     qrConsumedAt: w.qrConsumedAt || null,
@@ -190,12 +193,16 @@ export function adminRoutes({ jwtSecret }) {
     const waiver = await Waiver.findById(req.params.id);
     if (!waiver) return res.status(404).json({ error: "Waiver no encontrado." });
 
+    if (isWaiverQrExpired(waiver) || (["revoked", "rejected"].includes(waiver.status) && nextStatus !== waiver.status)) {
+      return res.status(409).json({ error: "Un QR vencido o desactivado no puede reactivarse." });
+    }
     const previousStatus = waiver.status;
     waiver.status = nextStatus;
     if (["approved", "rejected"].includes(nextStatus)) {
       waiver.review = { decision: nextStatus, comment, reviewedBy: req.user._id, reviewedAt: new Date() };
     }
-    await waiver.save();
+    const updated = await Waiver.findOneAndUpdate({ _id: waiver._id, status: previousStatus, ...qrWriteGuard(waiver) }, { $set: { status: nextStatus, review: waiver.review } }, { new: true }).lean();
+    if (!updated) return res.status(409).json({ error: "Carta modificada o vencida." });
     await WaiverAuditEvent.create({
       waiverId: waiver._id,
       userId: req.user._id,
@@ -371,6 +378,8 @@ export function adminRoutes({ jwtSecret }) {
       "status",
       "visitDate",
       "assignedAt",
+      "scheduleAssignedAt",
+      "qrExpiresAt",
       "validatedAt",
       "validatedBy",
       "qrConsumedAt",
@@ -410,6 +419,8 @@ export function adminRoutes({ jwtSecret }) {
           csvCell(r.status),
           csvCell(r.visitDate),
           csvCell(r.assignedAt ? new Date(r.assignedAt).toISOString() : ""),
+          csvCell(r.scheduleAssignedAt ? new Date(r.scheduleAssignedAt).toISOString() : ""),
+          csvCell(r.qrExpiresAt ? new Date(r.qrExpiresAt).toISOString() : ""),
           csvCell(r.validatedAt ? new Date(r.validatedAt).toISOString() : ""),
           csvCell(r.validatedBy),
           csvCell(r.qrConsumedAt ? new Date(r.qrConsumedAt).toISOString() : ""),

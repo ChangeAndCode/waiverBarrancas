@@ -60,6 +60,10 @@ const waiverSchema = new mongoose.Schema(
     },
     waiverTextSnapshot: { type: String, required: true },
     visitDate: { type: String, default: null },
+    // First real Staff assignment; API corrections never overwrite these fields.
+    scheduleAssignedAt: { type: Date, default: null },
+    qrExpiresAt: { type: Date, default: null },
+    // Scheduled visit instant (kept separate from the activation timestamp).
     assignedAt: { type: Date, default: null },
     validatedAt: { type: Date, default: null },
     validatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },

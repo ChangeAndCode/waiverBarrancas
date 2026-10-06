@@ -5,6 +5,8 @@ import { once } from 'node:events';
 import { testApp, payload, staffToken, secret, attractions } from './fixture.js';
 import { verifyWaiverToken } from '../src/lib/token.js';
 import { eligibleForAdditional, additionalAuthorized } from '../src/lib/additionalActivities.js';
+import { Attraction } from '../src/models/Attraction.js';
+import { Waiver } from '../src/models/Waiver.js';
 import { parkDateTime } from '../../shared/visitSchedule.js';
 
 async function setup(t) {
@@ -65,6 +67,8 @@ test('verified recovery selects among multiple waivers; requests are independent
   assert.equal(listed.data.find(row => row.id === id).qrUrl, created.data.qrUrl);
   await request(`/reports/validate/${created.data.token}`, 'POST', { assignedTime: '09:00' }, staffToken);
   const originalAssigned = w.assignedAt;
+  const originalExpiry = w.qrExpiresAt;
+  const originalActivation = w.scheduleAssignedAt;
   const savedActive = attractions[2].active;
   attractions[2].active = false;
   assert.equal((await request(`/public/recovery/waivers/${id}/activities`, 'POST', { attractionId: attractions[2]._id }, session)).status, 400);
@@ -91,6 +95,8 @@ test('verified recovery selects among multiple waivers; requests are independent
   assert.deepEqual(approvals.map(r => r.status).sort(), [200, 409]);
   assert.equal(activity.status, 'approved'); assert.equal(activity.schedule.time, '10:00');
   assert.deepEqual(w.assignedAt, originalAssigned);
+  assert.deepEqual(w.qrExpiresAt, originalExpiry);
+  assert.deepEqual(w.scheduleAssignedAt, originalActivation);
   const print = await request(`${endpoint}/ticket`, 'POST', { qrToken: created.data.token }, staffToken);
   assert.equal(print.status, 200); assert.equal(print.data.ticket.attractionName, attractions[2].name);
   assert.equal(print.data.ticket.qrToken, created.data.token); assert.equal(print.data.ticket.qrUrl, created.data.qrUrl);
@@ -123,10 +129,10 @@ test('expired recovery, abuse limits and historical QR association preserve lega
   assert.equal((await request(`/public/recovery/waivers/${id}/activities`, 'POST', { ...addition, qrToken: created.data.token, originalQrUrl: created.data.qrUrl }, session)).status, 201);
   assert.equal(w.qrToken, created.data.token);
   assert.equal(w.qrUrl, created.data.qrUrl);
-  w.assignedAt = new Date('2020-01-01'); w.status = 'approved';
+  w.qrExpiresAt = new Date('2020-01-01'); w.status = 'approved';
   assert.equal((await request('/public/recovery/waivers', 'GET', undefined, session)).data.length, 0);
   assert.equal((await request(`/public/recovery/waivers/${id}/activities`, 'POST', addition, session)).status, 409);
-  w.visitDate = null; w.createdAt = new Date(); w.qrConsumedAt = null;
+  w.visitDate = null; w.qrExpiresAt = null; w.createdAt = new Date(); w.qrConsumedAt = null;
   assert.equal((await request('/public/recovery/waivers', 'GET', undefined, session)).data.length, 0);
   assert.equal((await request(`/reports/validate/${created.data.token}`, 'GET', undefined, staffToken)).data.valid, true);
   assert.equal((await request(`/reports/validate/${created.data.token}`, 'GET', undefined, staffToken)).data.reason, 'qr_already_used');
@@ -143,4 +149,56 @@ test('eligibility and activity authorization enforce original expiry and explici
   assert.equal(additionalAuthorized(w, a, new Date('2026-10-04T06:00Z')), false);
   assert.equal(eligibleForAdditional({ ...w, assignedAt: null }, new Date('2026-10-03T12:00Z')), false);
   assert.equal(eligibleForAdditional({ ...w, deletedAt: new Date() }), false);
+});
+
+
+test('expiry blocks recovery, activity review and tickets, including a request crossing midnight', async t => {
+  const { request, records, events } = await setup(t);
+  const created = await request('/public/waivers', 'POST', payload());
+  const id = verifyWaiverToken(created.data.token, secret).waiverId;
+  const w = records.get(id);
+  assert.equal((await request(`/reports/validate/${created.data.token}`, 'POST', { assignedTime: '09:00' }, staffToken)).status, 200);
+  const expiresAt = new Date(w.qrExpiresAt).getTime();
+  t.mock.timers.setTime(expiresAt - 1);
+  const session = jwt.sign({ purpose: 'waiver-recovery', email: w.participant.email }, secret, { expiresIn: '15m' });
+  const beforeEvents = events.length;
+  // Lookup starts while active; the database write executes after midnight.
+  t.mock.method(Attraction, 'findOne', () => ({ lean: async () => {
+    t.mock.timers.setTime(expiresAt);
+    return attractions[2];
+  } }));
+  assert.equal((await request(`/public/recovery/waivers/${id}/activities`, 'POST', { attractionId: attractions[2]._id }, session)).status, 409);
+  assert.equal(w.additionalActivities.length, 0);
+  assert.equal(events.length, beforeEvents);
+  assert.equal((await request('/public/recovery/waivers', 'GET', undefined, session)).data.length, 0);
+  const activityId = '507f1f77bcf86cd799439022';
+  w.additionalActivities.push({ _id: activityId, attractionId: attractions[2]._id, status: 'approved',
+    validatedAt: w.validatedAt, schedule: { date: w.visitDate, time: '10:00', group: 'G' } });
+  const endpoint = `/reports/waivers/${id}/activities/${activityId}`;
+  assert.equal((await request(`${endpoint}/ticket`, 'POST', { qrToken: created.data.token }, staffToken)).status, 409);
+  w.additionalActivities[0].status = 'pending';
+  assert.equal((await request(`${endpoint}/review`, 'POST', { decision: 'approved', date: w.visitDate, time: '10:00', group: 'G', qrToken: created.data.token }, staffToken)).status, 409);
+  assert.equal((await request(`/public/check/${created.data.token}`)).data.reason, 'qr_expired');
+});
+
+test('activity review cannot persist when its database update crosses midnight', async t => {
+  const { request, records, events } = await setup(t);
+  const created = await request('/public/waivers', 'POST', payload());
+  const id = verifyWaiverToken(created.data.token, secret).waiverId;
+  const w = records.get(id);
+  await request(`/reports/validate/${created.data.token}`, 'POST', { assignedTime: '09:00' }, staffToken);
+  const session = jwt.sign({ purpose: 'waiver-recovery', email: w.participant.email }, secret, { expiresIn: '15m' });
+  const addition = await request(`/public/recovery/waivers/${id}/activities`, 'POST', { attractionId: attractions[2]._id }, session);
+  const originalUpdate = Waiver.findOneAndUpdate;
+  t.mock.method(Waiver, 'findOneAndUpdate', (filter, update, options) => {
+    t.mock.timers.setTime(new Date(w.qrExpiresAt).getTime());
+    return originalUpdate(filter, update, options);
+  });
+  const beforeEvents = events.length;
+  const result = await request(`/reports/waivers/${id}/activities/${addition.data.activityId}/review`, 'POST', {
+    decision: 'approved', date: w.visitDate, time: '10:00', group: 'G', qrToken: created.data.token
+  }, staffToken);
+  assert.equal(result.status, 409);
+  assert.equal(w.additionalActivities[0].status, 'pending');
+  assert.equal(events.length, beforeEvents);
 });

@@ -76,9 +76,11 @@ El texto del waiver incluido es generico para Mexico y debe ser revisado por ase
 
 ## Visitas y validación de carta responsiva
 
-El visitante indica el día con al menos 24 horas de anticipación al inicio de ese día
+El visitante puede registrarse el mismo día, el día anterior o con mayor anticipación
 (en `America/Chihuahua`). La carta nace en **Pendiente de validación**. Staff valida y
-asigna una hora general; el QR permanece vigente hasta terminar el día siguiente.
+asigna una hora general; la primera asignación real activa el QR hasta las 00:00 del día
+siguiente a esa asignación, independientemente del horario programado. `scheduleAssignedAt`
+y `qrExpiresAt` no cambian al editar horarios ni agregar actividades. No se usa cron ni TTL.
 Las cartas anteriores conservan sus reglas originales.
 
 Para pruebas locales, iniciar Vite con

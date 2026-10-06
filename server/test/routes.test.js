@@ -10,7 +10,7 @@ test("registration, access control, Staff assignment, repeated scans, revocation
   const savedKey = process.env.RESEND_API_KEY;
   delete process.env.RESEND_API_KEY;
   t.after(() => { if (savedKey !== undefined) process.env.RESEND_API_KEY = savedKey; });
-  const { app, records } = testApp(t.mock);
+  const { app, records, events } = testApp(t.mock);
   const server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
   t.after(() => new Promise((resolve) => server.close(resolve)));
@@ -21,11 +21,16 @@ test("registration, access control, Staff assignment, repeated scans, revocation
     });
     return { status: r.status, data: await r.json() };
   };
-  for (const day of [undefined, "2026-02-30", parkDate()]) {
+  for (const day of [undefined, "2026-02-30", "2020-01-01"]) {
     const r = await request("/public/waivers", "POST", { ...payload(), visitDate: day });
     assert.equal(r.status, 400);
   }
-  const malicious = { ...payload(), status: "approved", assignedAt: "2099-01-01", validatedBy: String(staff._id) };
+  for (const day of [parkDate(), parkDate(new Date(Date.now() + 86400000)), "2099-01-01"]) {
+    const registered = await request("/public/waivers", "POST", { ...payload(), visitDate: day });
+    assert.equal(registered.status, 201);
+  }
+  records.clear();
+  const malicious = { ...payload(), status: "approved", assignedAt: "2099-01-01", scheduleAssignedAt: "2099-01-01", qrExpiresAt: "2099-01-02", validatedBy: String(staff._id) };
   const created = await request("/public/waivers", "POST", malicious);
   assert.equal(created.status, 201);
   assert.equal(created.data.status, "pending");
@@ -39,6 +44,8 @@ test("registration, access control, Staff assignment, repeated scans, revocation
   assert.equal(stored.participant.cityState, "Chihuahua, Chihuahua");
   assert.equal(stored.attractionIds.length, 2);
   assert.equal(stored.validatedBy, null);
+  assert.equal(stored.scheduleAssignedAt, null);
+  assert.equal(stored.qrExpiresAt, null);
   const another = await request("/public/waivers", "POST", payload());
   assert.notEqual(another.data.token, token);
   assert.notEqual(another.data.folio, created.data.folio);
@@ -75,6 +82,14 @@ const visitorToken = signAuthToken(visitor, secret);
   assert.equal(stored.status, "approved");
   assert.equal(String(stored.validatedBy), String(staff._id));
   assert.ok(stored.validatedAt);
+  assert.deepEqual(stored.scheduleAssignedAt, new Date());
+  const firstAssignment = stored.scheduleAssignedAt;
+  const firstExpiry = stored.qrExpiresAt;
+  const assignmentEvent = events.find(e => e.waiverId === stored._id && e.action === "schedule_assigned");
+  assert.equal(assignmentEvent.userId, staff._id);
+  assert.deepEqual(assignmentEvent.metadata.scheduleAssignedAt, firstAssignment);
+  assert.deepEqual(assignmentEvent.metadata.qrExpiresAt, firstExpiry);
+  assert.equal(assignmentEvent.metadata.timezone, "America/Chihuahua");
   for (let i = 0; i < 2; i++) {
     assert.equal((await request(`/reports/validate/${token}`, "GET", undefined, staffToken)).data.accessAuthorized, true);
     assert.equal((await request(`/public/check/${token}`)).data.accessAuthorized, true);
@@ -84,6 +99,11 @@ const visitorToken = signAuthToken(visitor, secret);
   stored.safetyVerification = { weightStatus: "within_range", weightVerified: 55, comments: "Prueba" };
   const schedule = { qrToken: token, date: stored.visitDate, group: "Grupo 1", time: "09:00", attractionId: stored.attractionId };
   assert.equal((await request(`/reports/waivers/${waiverId}/schedule`, "PATCH", schedule, staffToken)).status, 200);
+  assert.equal((await request(`/reports/waivers/${waiverId}/schedule`, "PATCH", { ...schedule, date: "2099-01-01", time: "10:00" }, staffToken)).status, 200);
+  assert.equal(new Date(stored.assignedAt).toISOString(), "2099-01-01T16:00:00.000Z");
+  assert.deepEqual(stored.scheduleAssignedAt, firstAssignment);
+  assert.deepEqual(stored.qrExpiresAt, firstExpiry);
+  await request(`/reports/waivers/${waiverId}/schedule`, "PATCH", schedule, staffToken);
   const rescanned = (await request(`/reports/validate/${token}`, "GET", undefined, staffToken)).data;
   assert.equal(rescanned.waiver.schedule.group, "Grupo 1");
   assert.equal(rescanned.waiver.review.decision, "approved");
@@ -113,8 +133,13 @@ assert.equal(report.data.items[0].visitDate, created.data.visitDate);
   stored.status = "revoked";
   assert.equal((await request(`/public/check/${token}`)).status, 404);
   assert.equal((await request(`/reports/validate/${token}`, "POST", { assignedTime: "11:00" }, staffToken)).status, 404);
+  assert.equal((await request(`/admin/waivers/${waiverId}/status`, "PATCH", { status: "approved" }, adminToken)).status, 409);
   stored.status = "approved";
-  stored.assignedAt = new Date("2020-01-01T15:00:00Z");
+  t.mock.timers.setTime(new Date(firstExpiry).getTime());
+  assert.equal((await request(`/admin/waivers/${waiverId}/status`, "PATCH", { status: "pending" }, adminToken)).status, 409);
+  assert.equal((await request(`/reports/waivers/${waiverId}/schedule`, "PATCH", schedule, staffToken)).status, 409);
+  assert.equal((await request(`/reports/waivers/${waiverId}/ticket`, "POST", { qrToken: token }, staffToken)).status, 409);
+  assert.equal((await request(`/reports/validate/${token}`, "POST", { assignedTime: "11:00" }, staffToken)).status, 409);
   assert.equal((await request(`/public/check/${token}`)).data.reason, "qr_expired");
   assert.equal((await request(`/reports/validate/${token}`, "GET", undefined, staffToken)).data.reason, "qr_expired");
   assert.equal((await request("/public/check/invalid-token")).status, 400);

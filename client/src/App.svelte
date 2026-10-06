@@ -1016,6 +1016,24 @@ async function handleCancelledPayment() {
     staffScanDetector = null;
   }
 
+  let qrExpiryTimer;
+  function armQrExpiry(publicResult, staffResult, recovered) {
+    clearTimeout(qrExpiryTimer);
+    const deadlines = [publicResult?.valid && publicResult.waiver?.expiresAt,
+      staffResult?.valid && staffResult.waiver?.expiresAt,
+      ...recovered.map(w => w.expiresAt)].filter(Boolean).map(value => new Date(value).getTime());
+    if (!deadlines.length) return;
+    qrExpiryTimer = setTimeout(() => {
+      const expire = result => result?.valid && result.waiver?.expiresAt && Date.now() >= new Date(result.waiver.expiresAt).getTime()
+        ? { valid: false, reason: "qr_expired", expiresAt: result.waiver.expiresAt,
+            signedAt: result.waiver.signedAt, fullName: result.waiver.fullName, attractionName: result.waiver.attractionName } : result;
+      checkData = expire(checkData);
+      staffScanResult = expire(staffScanResult);
+      recoveryWaivers = recoveryWaivers.filter(w => !w.expiresAt || Date.now() < new Date(w.expiresAt).getTime());
+    }, Math.min(2147483647, Math.max(0, Math.min(...deadlines) - Date.now())));
+  }
+  $: armQrExpiry(checkData, staffScanResult, recoveryWaivers);
+  onDestroy(() => clearTimeout(qrExpiryTimer));
   onDestroy(stopStaffScan);
 
   $: if (!(path === "/staff" && authToken)) stopStaffScan();
@@ -1133,11 +1151,11 @@ async function reviewStaffWaiver(decision) {
     staffScheduleBusy = true;
     staffScanError = "";
     try {
-      const result = await api(`/reports/waivers/${databaseId}/schedule`, "PATCH", {
+      await api(`/reports/waivers/${databaseId}/schedule`, "PATCH", {
         ...staffSchedule,
         qrToken
       });
-      staffScanResult = { ...staffScanResult, waiver: { ...staffScanResult.waiver, schedule: result.waiver.schedule } };
+      staffScanResult = await api(`/reports/validate/${encodeURIComponent(qrToken)}`);
     } catch (e) {
       staffScanError = e.message;
     } finally {
@@ -1674,6 +1692,7 @@ async function reviewStaffWaiver(decision) {
           <p><b>Día de visita:</b> {checkData.waiver.visitDate}</p>
           <p><b>Horario (Chihuahua):</b> {parkDateTimeLabel(checkData.waiver.assignedAt)}</p>
           <p>{L.validityHelp}</p>
+          {#if checkData.waiver.scheduleAssignedAt}<p><b>Primera asignación (Chihuahua):</b> {parkDateTimeLabel(checkData.waiver.scheduleAssignedAt)}</p>{/if}
           {#if checkData.waiver.expiresAt}<p><b>Vence al iniciar:</b> {parkDateTimeLabel(checkData.waiver.expiresAt)} (hora del parque)</p>{/if}
         {/if}
         {#if checkData.additionalActivities?.length}
@@ -1695,7 +1714,7 @@ async function reviewStaffWaiver(decision) {
           La vigencia de este QR terminó. Consulta a Staff antes de realizar las actividades.
         </p>
         <p><b>Firmado el:</b> {new Date(checkData.signedAt).toLocaleString("es-MX")}</p>
-        <p><b>Venció el:</b> {new Date(checkData.expiresAt).toLocaleString("es-MX")}</p>
+        <p><b>Venció el:</b> {parkDateTimeLabel(checkData.expiresAt)}</p>
         {#if checkData.fullName}
           <p><b>Nombre:</b> {checkData.fullName}</p>
         {/if}
@@ -1794,6 +1813,8 @@ async function reviewStaffWaiver(decision) {
            {#if false && staffScanResult.waiver.visitDate}
             <p><b>Día de visita:</b> {staffScanResult.waiver.visitDate}</p>
             <p><b>Horario general (Chihuahua):</b> {parkDateTimeLabel(staffScanResult.waiver.assignedAt)}</p>
+            {#if staffScanResult.waiver.scheduleAssignedAt}<p><b>Primera asignación:</b> {parkDateTimeLabel(staffScanResult.waiver.scheduleAssignedAt)} (Chihuahua)</p>{/if}
+            {#if staffScanResult.waiver.expiresAt}<p><b>Vence al iniciar:</b> {parkDateTimeLabel(staffScanResult.waiver.expiresAt)} (Chihuahua)</p>{/if}
             {#if staffScanResult.waiver.status === "pending" || staffScanResult.waiver.status === "signed"}
               <label class="field-label" for="staffVisitTime">Horario general de la visita</label>
               <input id="staffVisitTime" type="time" bind:value={staffSchedule.time} />
@@ -1871,7 +1892,7 @@ async function reviewStaffWaiver(decision) {
         <div class="staff-scan-result">
           <p class="bad">Vigencia vencida</p>
           <p><b>Firmado el:</b> {new Date(staffScanResult.signedAt).toLocaleString("es-MX")}</p>
-          <p><b>Venció el:</b> {new Date(staffScanResult.expiresAt).toLocaleString("es-MX")}</p>
+          <p><b>Venció el:</b> {parkDateTimeLabel(staffScanResult.expiresAt)}</p>
           {#if staffScanResult.fullName}<p><b>Nombre:</b> {staffScanResult.fullName}</p>{/if}
         </div>
       {:else if staffScanResult?.reason === "qr_already_used"}
@@ -2318,10 +2339,15 @@ async function reviewStaffWaiver(decision) {
                     {#each adminHistory.data.events as event}
                       <div class="history-event">
                         <p>
-                          <b>{event.action}</b> — {new Date(event.createdAt).toLocaleString("es-MX")}
+                          <b>{event.action}</b> — {parkDateTimeLabel(event.createdAt)}
                           {#if event.userId} — {event.userId.name} ({event.userId.role}){/if}
                         </p>
                         {#if event.comment}<p class="muted">Comentario: {event.comment}</p>{/if}
+                        {#if event.metadata?.scheduleAssignedAt}
+                          <p>Primera asignación: {parkDateTimeLabel(event.metadata.scheduleAssignedAt)} (Chihuahua)</p>
+                          <p>Vence al iniciar: {parkDateTimeLabel(event.metadata.qrExpiresAt)} (Chihuahua)</p>
+                          <p>Horario programado: {event.metadata.date} · {event.metadata.time}</p>
+                        {/if}
                         {#if event.metadata?.activityId}<p>{L.additionalActivities}: {event.metadata.activityId}</p>{/if}
                       </div>
                     {/each}
