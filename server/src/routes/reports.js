@@ -2,11 +2,13 @@ import { additionalStaffRoutes } from "./additionalStaff.js";
 import { Router } from "express";
 import { requireAuth, requirePermissions, requireRoles } from "../lib/auth.js";
 import { Waiver } from "../models/Waiver.js";
+import { Attraction } from "../models/Attraction.js";
 import { verifyWaiverToken } from "../lib/token.js";
 import { nowMs, perfLog } from "../lib/perf.js";
 import { waiverDisplayId } from "../lib/folio.js";
 import { getWaiverQrExpiresAt, isWaiverQrExpired, qrWriteGuard } from "../lib/waiverValidity.js";
 import { WaiverAuditEvent } from "../models/WaiverAuditEvent.js";
+import { waiverAlerts, weightRangeFor } from "../lib/waiverAlerts.js";
 
 function mapStaffWaiver(waiver) {
   return {
@@ -37,6 +39,8 @@ function mapStaffWaiver(waiver) {
     signedAt: waiver.createdAt,
     status: waiver.status === "signed" ? "pending" : waiver.status,
     review: waiver.review || null
+    ,safetyVerification: waiver.safetyVerification || null
+    ,alerts: waiverAlerts(waiver, { name: waiver.attractionName })
   };
 }
 import { parkDateTime, visitQrExpiresAt, PARK_TIME_ZONE } from "../../../shared/visitSchedule.js";
@@ -85,10 +89,11 @@ export function reportRoutes({ jwtSecret }) {
     if (!waiver) {
       return res.status(404).json({ error: "Waiver no encontrado o revocado." });
     }
+    if (decision === "approved" && waiver.visitDate && waiver.safetyVerification?.weightStatus !== "within_range") {
+      return res.status(409).json({ error: "Primero registra el peso y la observación; el peso debe estar dentro del rango permitido." });
+    }
 
     if (isWaiverQrExpired(waiver)) return res.status(409).json({ error: "Carta vencida." });
-    if (waiver.visitDate && decision === "approved" && !waiver.assignedAt) return res.status(409).json({ error: "Valida la visita asignando su horario general." });
-
     waiver.review = {
       decision,
       comment,
@@ -96,7 +101,15 @@ export function reportRoutes({ jwtSecret }) {
       reviewedAt: new Date()
     };
     waiver.status = decision;
-    const updated = await Waiver.findOneAndUpdate({ _id: waiver._id, status: { $in: ["pending", "signed"] }, ...qrWriteGuard(waiver) }, { $set: { review: waiver.review, status: decision } }, { new: true }).lean();
+    if (decision === "approved") {
+      waiver.validatedAt = waiver.review.reviewedAt;
+      waiver.validatedBy = req.user._id;
+    }
+    const updated = await Waiver.findOneAndUpdate(
+      { _id: waiver._id, status: { $in: ["pending", "signed"] }, ...qrWriteGuard(waiver) },
+      { $set: { review: waiver.review, status: decision, ...(decision === "approved" ? { validatedAt: waiver.validatedAt, validatedBy: waiver.validatedBy } : {}) } },
+      { new: true }
+    ).lean();
     if (!updated) return res.status(409).json({ error: "Carta modificada o vencida." });
     await WaiverAuditEvent.create({
       waiverId: waiver._id,
@@ -120,11 +133,13 @@ export function reportRoutes({ jwtSecret }) {
       ok: true,
       waiver: {
         id: waiverDisplayId(waiver),
-        status: waiver.status,
-        decision: waiver.review.decision,
-        comment: waiver.review.comment,
-        reviewedBy: waiver.review.reviewedBy,
-        reviewedAt: waiver.review.reviewedAt
+        status: updated.status,
+        decision: updated.review.decision,
+        comment: updated.review.comment,
+        reviewedBy: updated.review.reviewedBy,
+        reviewedAt: updated.review.reviewedAt,
+        validatedBy: updated.validatedBy,
+        validatedAt: updated.validatedAt
       }
     });
     }
@@ -158,20 +173,28 @@ export function reportRoutes({ jwtSecret }) {
       if (!waiver || ["revoked", "rejected"].includes(waiver.status)) {
         return res.status(404).json({ error: "Waiver no encontrado o no disponible." });
       }
+      if (isWaiverQrExpired(waiver)) return res.status(409).json({ error: "Carta vencida." });
+      if (waiver.status !== "approved") return res.status(409).json({ error: "La carta debe estar validada antes de asignar horario." });
+      if (waiver.visitDate && waiver.safetyVerification?.weightStatus !== "within_range") return res.status(409).json({ error: "Primero registra el peso y la observación; el peso debe estar dentro del rango permitido." });
       if (![String(waiver.attractionId), ...(waiver.attractionIds || []).map(String)].includes(attractionId)) {
         return res.status(400).json({ error: "La atracción no pertenece al waiver." });
       }
 
-      if (isWaiverQrExpired(waiver)) return res.status(409).json({ error: "Carta vencida." });
-      if (waiver.visitDate && (!waiver.assignedAt || waiver.status !== "approved")) return res.status(409).json({ error: "Valida primero la carta y asigna el horario general." });
+      const attractionIndex = (waiver.attractionIds || []).findIndex(id => String(id) === attractionId);
+      const attractionName = attractionIndex >= 0
+        ? (waiver.attractionNames || [])[attractionIndex] || waiver.attractionName
+        : waiver.attractionName;
+      const assignedAt = parkDateTime(date, time);
+      if (!assignedAt || assignedAt.getTime() < Date.now()) return res.status(400).json({ error: "El horario debe ser válido y futuro." });
       if (!parkDateTime(date, time)) return res.status(400).json({ error: "Fecha u hora inválida." });
-      const attractionName = waiver.attractionName;
       const schedule = { date, group, time, attractionId, attractionName, assignedBy: req.user._id, assignedAt: new Date() };
-      const changes = { schedule };
       // New visits keep the displayed general time aligned with the edited schedule.
       // Historical visits retain assignedAt because it is their former expiry reference.
-      if (waiver.scheduleAssignedAt) changes.assignedAt = parkDateTime(date, time);
-      const updated = await Waiver.findOneAndUpdate({ _id: waiver._id, status: waiver.status, assignedAt: waiver.assignedAt, ...qrWriteGuard(waiver) }, { $set: changes }, { new: true }).lean();
+      const updated = await Waiver.findOneAndUpdate(
+        { _id: waiver._id, status: "approved", assignedAt: waiver.assignedAt, ...qrWriteGuard(waiver) },
+        { $set: { schedule, assignedAt } },
+        { new: true }
+      ).lean();
       if (!updated) return res.status(409).json({ error: "Carta modificada o vencida." });
       waiver.schedule = updated.schedule;
       await WaiverAuditEvent.create({
@@ -184,6 +207,31 @@ export function reportRoutes({ jwtSecret }) {
       return res.json({ ok: true, waiver: { id: waiverDisplayId(waiver), schedule: waiver.schedule } });
     }
   );
+
+  router.post("/waivers/:id/weight-verification", requirePermissions("waiver.review", "waiver.comment"), async (req, res) => {
+    const weight = Number(req.body?.weight);
+    const comment = String(req.body?.comment || "").trim();
+    const attractionId = String(req.body?.attractionId || "").trim();
+    if (!Number.isFinite(weight) || weight <= 0 || weight > 300) return res.status(400).json({ error: "El peso debe estar entre 0 y 300 kg." });
+    if (!comment) return res.status(400).json({ error: "La observación de verificación es obligatoria." });
+    const waiver = await Waiver.findOne({ _id: req.params.id, deletedAt: null, status: { $in: ["pending", "approved"] } });
+    if (!waiver) return res.status(404).json({ error: "Carta no encontrada o no disponible." });
+    if (!attractionId || ![String(waiver.attractionId), ...(waiver.attractionIds || []).map(String)].includes(attractionId)) return res.status(400).json({ error: "La atracción es obligatoria y debe pertenecer al waiver." });
+    const attraction = await Attraction.findOne({ _id: attractionId }).lean();
+    if (!attraction) return res.status(400).json({ error: "La atracción no existe." });
+    const range = weightRangeFor(attraction);
+    const status = range && (weight < range.min || weight > range.max) ? "outside_range" : "within_range";
+    waiver.safetyVerification = { ...(waiver.safetyVerification || {}), weightVerified: weight, weightStatus: status, comments: comment, checkedBy: req.user._id, checkedAt: new Date() };
+    await waiver.save();
+    await WaiverAuditEvent.create({ waiverId: waiver._id, userId: req.user._id, userRole: req.user.role, action: "weight_verified", comment, metadata: { weight, status } });
+    return res.json({ ok: true, attraction: { id: attraction._id, name: attraction.name, code: attraction.code }, safetyVerification: waiver.safetyVerification, alerts: waiverAlerts(waiver, attraction) });
+  });
+
+  router.get("/pending", requirePermissions("waiver.read.scanned"), async (req, res) => {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
+    const rows = await Waiver.find({ deletedAt: null, status: { $in: ["pending", "signed"] }, ...(req.query.visitDate ? { visitDate: String(req.query.visitDate) } : {}) }).sort({ visitDate: 1, createdAt: 1 }).limit(limit).lean();
+    return res.json({ items: rows.map(mapStaffWaiver), total: rows.length });
+  });
 
   router.post(
     "/waivers/:id/ticket",

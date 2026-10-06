@@ -32,6 +32,8 @@ const waiverSchema = new mongoose.Schema(
       medications: { type: String, trim: true, default: "" },
       treatingPhysician: { type: String, trim: true, default: "" },
       physicianPhone: { type: String, trim: true, default: "" },
+      height: { type: Number, min: 0, default: null },
+      weight: { type: Number, min: 0, default: null },
       emergencyContactRelationship: { type: String, trim: true, default: "" },
       familyReference2Name: { type: String, trim: true, default: "" },
       familyReference2Relationship: { type: String, trim: true, default: "" },
@@ -75,6 +77,15 @@ const waiverSchema = new mongoose.Schema(
       comment: { type: String, trim: true, default: "" },
       reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
       reviewedAt: { type: Date, default: null }
+    },
+
+    safetyVerification: {
+      weightDeclared: { type: Number, min: 0, default: null },
+      weightVerified: { type: Number, min: 0, default: null },
+      weightStatus: { type: String, enum: ["not_required", "pending", "within_range", "outside_range"], default: "pending" },
+      comments: { type: String, trim: true, default: "" },
+      checkedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+      checkedAt: { type: Date, default: null }
     },
 
     qrConsumedAt: { type: Date, default: null },
