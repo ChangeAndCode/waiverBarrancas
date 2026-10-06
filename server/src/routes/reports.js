@@ -89,6 +89,9 @@ export function reportRoutes({ jwtSecret }) {
     if (!waiver) {
       return res.status(404).json({ error: "Waiver no encontrado o revocado." });
     }
+    if (decision === "approved" && waiver.visitDate && waiver.safetyVerification?.weightStatus !== "within_range") {
+      return res.status(409).json({ error: "Primero registra el peso y la observación; el peso debe estar dentro del rango permitido." });
+    }
 
     waiver.review = {
       decision,
@@ -165,6 +168,7 @@ export function reportRoutes({ jwtSecret }) {
         return res.status(404).json({ error: "Waiver no encontrado o no disponible." });
       }
       if (waiver.status !== "approved") return res.status(409).json({ error: "La carta debe estar validada antes de asignar horario." });
+      if (waiver.visitDate && waiver.safetyVerification?.weightStatus !== "within_range") return res.status(409).json({ error: "Primero registra el peso y la observación; el peso debe estar dentro del rango permitido." });
       if (![String(waiver.attractionId), ...(waiver.attractionIds || []).map(String)].includes(attractionId)) {
         return res.status(400).json({ error: "La atracción no pertenece al waiver." });
       }
@@ -194,6 +198,7 @@ export function reportRoutes({ jwtSecret }) {
     const comment = String(req.body?.comment || "").trim();
     const attractionId = String(req.body?.attractionId || "").trim();
     if (!Number.isFinite(weight) || weight <= 0 || weight > 300) return res.status(400).json({ error: "El peso debe estar entre 0 y 300 kg." });
+    if (!comment) return res.status(400).json({ error: "La observación de verificación es obligatoria." });
     const waiver = await Waiver.findOne({ _id: req.params.id, deletedAt: null, status: { $in: ["pending", "approved"] } });
     if (!waiver) return res.status(404).json({ error: "Carta no encontrada o no disponible." });
     if (!attractionId || ![String(waiver.attractionId), ...(waiver.attractionIds || []).map(String)].includes(attractionId)) return res.status(400).json({ error: "La atracción es obligatoria y debe pertenecer al waiver." });

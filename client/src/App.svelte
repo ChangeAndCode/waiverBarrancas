@@ -131,6 +131,7 @@
   let staffSchedule = { date: "", group: "", time: "", attractionId: "" };
   let staffWeightDraft = "";
   let staffWeightComment = "";
+  $: staffWeightReady = staffScanResult?.waiver?.safetyVerification?.weightStatus === "within_range";
   let staffScheduleBusy = false;
   let staffTicketBusy = false;
   let staffReviewBusy = false;
@@ -1105,6 +1106,10 @@ async function reviewStaffWaiver(decision) {
 
   async function validateStaffVisit() {
     if (!staffQrToken || staffReviewBusy) return;
+    if (!staffWeightReady) {
+      staffScanError = "Registra primero el peso y la observación para validar la carta.";
+      return;
+    }
     staffReviewBusy = true;
     staffScanError = "";
     try {
@@ -1626,8 +1631,10 @@ async function reviewStaffWaiver(decision) {
     <nav>
       {#if path === "/admin" && authUser?.role === "admin"}
         <span class="admin-pill">Modo Admin</span>
-      {:else if !authToken || authUser?.role === "admin"}
-        <button on:click={() => goTo("/admin")}>{isPublicWaiverUi ? L.admin : "Iniciar Sesión"}</button>
+      {:else if authToken && authUser?.role === "admin"}
+        <button on:click={() => goTo("/admin")}>Ir a Dashboard</button>
+      {:else if !authToken}
+        <button on:click={() => goTo("/admin")}>Iniciar Sesión</button>
       {/if}
       {#if authToken}
         <button on:click={logout}>{isPublicWaiverUi ? L.logout : "Salir"}</button>
@@ -1710,7 +1717,7 @@ async function reviewStaffWaiver(decision) {
         <p class="bad">Waiver rechazado</p>
         {#if checkData.comment}<p><b>Motivo:</b> {checkData.comment}</p>{/if}
         {#if checkData.fullName}<p><b>Nombre:</b> {checkData.fullName}</p>{/if}
-      {:else}
+           {:else if false}
         <p class="bad">No disponible</p>
         <p>{message || "No se pudo mostrar el código."}</p>
       {/if}
@@ -1767,12 +1774,16 @@ async function reviewStaffWaiver(decision) {
                  {#each staffScanResult.waiver.alerts as alert}<p>{alert.message}</p>{/each}
                </div>
              {:else}<p class="ok">Sin alertas automáticas.</p>{/if}
-             <div class="schedule-box">
-               <label class="field-label" for="staffWeight">Peso verificado (kg)</label>
-               <input id="staffWeight" type="number" min="1" max="300" step="0.1" bind:value={staffWeightDraft} />
-               <label class="field-label" for="staffWeightComment">Observaciones de verificación</label>
-               <textarea id="staffWeightComment" rows="2" bind:value={staffWeightComment}></textarea>
-               <button type="button" on:click={verifyStaffWeight} disabled={staffReviewBusy || !staffWeightDraft}>Registrar verificación</button>
+             <div class="schedule-box verification-box">
+               <div class="verification-field">
+                 <label class="field-label" for="staffWeight">Peso verificado (kg)</label>
+                 <input id="staffWeight" type="number" min="1" max="300" step="0.1" bind:value={staffWeightDraft} />
+               </div>
+               <div class="verification-field">
+                 <label class="field-label" for="staffWeightComment">Observaciones de verificación</label>
+                 <textarea id="staffWeightComment" rows="2" bind:value={staffWeightComment}></textarea>
+               </div>
+               <button type="button" on:click={verifyStaffWeight} disabled={staffReviewBusy || !staffWeightDraft || !staffWeightComment.trim()}>Registrar verificación</button>
                {#if staffScanResult.waiver.safetyVerification?.weightStatus}
                  <p><b>Resultado:</b> {staffScanResult.waiver.safetyVerification.weightStatus}</p>
                {/if}
@@ -1780,26 +1791,38 @@ async function reviewStaffWaiver(decision) {
              <p><b>Firma registrada:</b> {staffScanResult.waiver.hasSignature ? "Sí" : "No"}</p>
              <p><b>Firma de testigo:</b> {staffScanResult.waiver.witness?.hasSignature ? "Sí" : "No"}</p>
           </details>
-          {#if staffScanResult.waiver.visitDate}
+           {#if false && staffScanResult.waiver.visitDate}
             <p><b>Día de visita:</b> {staffScanResult.waiver.visitDate}</p>
             <p><b>Horario general (Chihuahua):</b> {parkDateTimeLabel(staffScanResult.waiver.assignedAt)}</p>
             {#if staffScanResult.waiver.status === "pending" || staffScanResult.waiver.status === "signed"}
               <label class="field-label" for="staffVisitTime">Horario general de la visita</label>
               <input id="staffVisitTime" type="time" bind:value={staffSchedule.time} />
-              <button type="button" on:click={validateStaffVisit} disabled={staffReviewBusy || !staffSchedule.time}>
+              <button type="button" on:click={validateStaffVisit} disabled={staffReviewBusy || !staffSchedule.time || !staffWeightReady}>
                 {staffReviewBusy ? "Validando..." : "Validar carta y asignar horario general"}
               </button>
             {/if}
           {/if}
-          <div class="schedule-box">
-            <h4>Asignar horario</h4>
+           {#if !staffScanResult.waiver.review?.decision}
+             <div class="review-actions staff-review-before-schedule">
+               <label class="field-label" for="staffReviewCommentBeforeSchedule">Comentario de revisión</label>
+               <textarea id="staffReviewCommentBeforeSchedule" bind:value={staffReviewComment} rows="3" maxlength="1000" placeholder="Comentario opcional para validar u obligatorio para rechazar"></textarea>
+               <div class="inline-actions">
+                 <button type="button" on:click={() => reviewStaffWaiver("approved")} disabled={staffReviewBusy || !staffWeightReady}>Validar carta</button>
+                 <button type="button" class="secondary" on:click={() => reviewStaffWaiver("rejected")} disabled={staffReviewBusy}>Rechazar carta</button>
+               </div>
+               {#if !staffWeightReady}<p class="bad" role="alert">Registra primero el peso y la observación para validar la carta.</p>{/if}
+             </div>
+           {/if}
+           <div class="schedule-box staff-main-schedule">
+             <h4>Asignar horario</h4>
             <label class="field-label" for="staffScheduleDate">Fecha</label>
             <input id="staffScheduleDate" type="date" bind:value={staffSchedule.date} />
             <label class="field-label" for="staffScheduleGroup">Grupo</label>
             <input id="staffScheduleGroup" bind:value={staffSchedule.group} placeholder="Grupo 1" />
             <label class="field-label" for="staffScheduleTime">Horario</label>
             <input id="staffScheduleTime" type="time" bind:value={staffSchedule.time} />
-            <button type="button" on:click={assignStaffSchedule} disabled={staffScheduleBusy}>
+              {#if !staffWeightReady}<p class="bad" role="alert">Registra primero el peso y la observación para poder asignar horario.</p>{/if}
+              <button type="button" on:click={assignStaffSchedule} disabled={staffScheduleBusy || !staffWeightReady}>
               {staffScheduleBusy ? "Asignando..." : "Asignar horario"}
             </button>
             {#if staffScanResult.waiver.schedule?.date}
@@ -1818,9 +1841,7 @@ async function reviewStaffWaiver(decision) {
             <label class="field-label" for="staffReviewComment">Comentario de revisión</label>
             <textarea id="staffReviewComment" bind:value={staffReviewComment} rows="3" maxlength="1000" placeholder="Comentario opcional para aprobar u obligatorio para rechazar"></textarea>
             <div class="inline-actions">
-              {#if !staffScanResult.waiver.visitDate}
-                <button type="button" on:click={() => reviewStaffWaiver("approved")} disabled={staffReviewBusy}>Aprobar waiver</button>
-              {/if}
+               <button type="button" on:click={() => reviewStaffWaiver("approved")} disabled={staffReviewBusy || !staffWeightReady}>Validar carta</button>
               <button type="button" class="secondary" on:click={() => reviewStaffWaiver("rejected")} disabled={staffReviewBusy}>Rechazar waiver</button>
             </div>
           {/if}
@@ -2759,6 +2780,37 @@ async function reviewStaffWaiver(decision) {
     font-weight: 600;
     color: #1f4a3b;
     margin-top: 4px;
+  }
+  .verification-box {
+    gap: 12px;
+  }
+  .staff-main-schedule ~ .inline-actions {
+    display: none;
+  }
+  .staff-main-schedule ~ label[for="staffReviewComment"],
+  .staff-main-schedule ~ #staffReviewComment {
+    display: none;
+  }
+  .staff-review-before-schedule {
+    display: grid;
+    gap: 12px;
+    margin: 16px 0;
+  }
+  .staff-review-before-schedule .inline-actions {
+    gap: 12px;
+  }
+  .verification-box > button {
+    margin-top: 8px;
+  }
+  .verification-field {
+    display: grid;
+    gap: 6px;
+    width: 100%;
+  }
+  .verification-field input,
+  .verification-field textarea {
+    width: 100%;
+    box-sizing: border-box;
   }
   .waiver-form {
     gap: 16px;

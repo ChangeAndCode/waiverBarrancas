@@ -81,6 +81,7 @@ const visitorToken = signAuthToken(visitor, secret);
   }
   assert.equal(stored.qrConsumedAt, null);
   assert.equal((await request(`/reports/waivers/${waiverId}/ticket`, "POST", { qrToken: token }, staffToken)).status, 409);
+  stored.safetyVerification = { weightStatus: "within_range", weightVerified: 55, comments: "Prueba" };
   const schedule = { qrToken: token, date: stored.visitDate, group: "Grupo 1", time: "09:00", attractionId: stored.attractionId };
   assert.equal((await request(`/reports/waivers/${waiverId}/schedule`, "PATCH", schedule, staffToken)).status, 200);
   const rescanned = (await request(`/reports/validate/${token}`, "GET", undefined, staffToken)).data;
