@@ -280,6 +280,7 @@ export function reportRoutes({ jwtSecret }) {
           time: waiver.schedule.time,
           group: waiver.schedule.group,
           cityState: waiver.participant.cityState || "",
+          chihuahuaBenefit: /chihuahua/i.test(String(waiver.participant.cityState || "")),
           qrToken: waiver.qrToken || qrToken,
           qrUrl: waiver.qrUrl || ""
         }
