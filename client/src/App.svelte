@@ -134,6 +134,7 @@
   $: staffWeightReady = staffScanResult?.waiver?.safetyVerification?.weightStatus === "within_range";
   let staffScheduleBusy = false;
   let staffTicketBusy = false;
+  let staffTicketPaperWidth = "58";
   let staffReviewBusy = false;
   let staffScanBusy = false;
   let staffScanError = "";
@@ -1194,16 +1195,30 @@ async function reviewStaffWaiver(decision) {
         ticket[key] = String(ticket[key] || "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
       }
       const qrDataUrl = await QRCode.toDataURL(ticket.qrUrl || `${window.location.origin}/check/${ticket.qrToken}`);
+      const paper = staffTicketPaperWidth === "80"
+        ? { page: "80mm", body: "72mm", ticket: "68mm", logo: "24mm", qr: "42mm" }
+        : { page: "57mm", body: "47mm", ticket: "47mm", logo: "17mm", qr: "30mm" };
       const printWindow = window.open("", "_blank", "width=600,height=800");
       if (!printWindow) throw new Error("El navegador bloqueó la ventana de impresión.");
+      const startPrint = () => {
+        printWindow.focus();
+        printWindow.print();
+      };
+      printWindow.document.open();
       printWindow.document.write(`
         <!doctype html><html><head><title>Ticket ${ticket.id}</title>
-        <style>body{font-family:Arial,sans-serif;text-align:center;padding:24px;color:#173f35}img.logo{width:90px}img.qr{width:220px}h1{font-size:22px}.ticket{border:2px solid #173f35;border-radius:12px;padding:20px;max-width:360px;margin:auto}.row{text-align:left;margin:10px 0}.label{font-weight:700}</style>
-        </head><body><div class="ticket"><img class="logo" src="/logobarrancas.png" alt="Parque Barrancas"><h1>Ticket de acceso</h1>
-        <div class="row"><span class="label">Folio:</span> ${ticket.id}</div><div class="row"><span class="label">Nombre:</span> ${ticket.fullName}</div><div class="row"><span class="label">Atracción:</span> ${ticket.attractionName}</div><div class="row"><span class="label">Fecha:</span> ${ticket.date}</div><div class="row"><span class="label">Horario:</span> ${ticket.time}</div><div class="row"><span class="label">Grupo:</span> ${ticket.group}</div><div class="row"><span class="label">Procedencia:</span> ${ticket.cityState}</div><img class="qr" src="${qrDataUrl}" alt="Código QR"></div></body></html>`);
+        <style>@page{size:${paper.page} auto;margin:0}*{box-sizing:border-box}html,body{width:${paper.page};margin:0;padding:0;background:#fff}body{font-family:Arial,sans-serif;text-align:center;color:#000}.ticket{width:${paper.ticket};margin:0 auto;padding:3mm 2mm}img.logo{width:${paper.logo};height:auto;margin-bottom:1mm}h1{font-size:13px;margin:1mm 0 3mm;text-transform:uppercase}.row{text-align:left;font-size:10px;line-height:1.25;margin:1.5mm 0;overflow-wrap:anywhere}.label{font-weight:700}.benefit{font-size:10px;font-weight:700;border-top:1px dashed #000;border-bottom:1px dashed #000;padding:1.5mm 0;margin:2mm 0}img.qr{display:block;width:${paper.qr};height:${paper.qr};margin:4mm auto 2mm}.footer{font-size:9px;margin-top:1.5mm}@media screen{body{border:1px dashed #999;margin:12px auto}.ticket{padding:3mm 2mm}}</style>
+        </head><body><div class="ticket"><img class="logo" src="/logobarrancas.png" alt="Parque Barrancas"><h1>Ticket de acceso</h1>${ticket.chihuahuaBenefit ? '<div class="benefit">Beneficio Chihuahua: Aplicable</div>' : ''}
+        <div class="row"><span class="label">Folio:</span> ${ticket.id}</div><div class="row"><span class="label">Nombre:</span> ${ticket.fullName}</div><div class="row"><span class="label">Atracción:</span> ${ticket.attractionName}</div><div class="row"><span class="label">Fecha:</span> ${ticket.date}</div><div class="row"><span class="label">Horario:</span> ${ticket.time}</div><div class="row"><span class="label">Grupo:</span> ${ticket.group}</div><div class="row"><span class="label">Procedencia:</span> ${ticket.cityState}</div><img class="qr" src="${qrDataUrl}" alt="Código QR"><div class="footer">Presentar en Taquilla</div></div></body></html>`);
       printWindow.document.close();
-      printWindow.focus();
-      printWindow.print();
+      const images = Array.from(printWindow.document.images || []);
+      const waitForImages = images.length
+        ? Promise.all(images.map(image => image.complete ? Promise.resolve() : new Promise(resolve => {
+          image.addEventListener("load", resolve, { once: true });
+          image.addEventListener("error", resolve, { once: true });
+        })))
+        : Promise.resolve();
+      waitForImages.then(() => setTimeout(startPrint, 500));
     } catch (e) {
       staffScanError = e.message;
     } finally {
@@ -1848,6 +1863,11 @@ async function reviewStaffWaiver(decision) {
             </button>
             {#if staffScanResult.waiver.schedule?.date}
               <p class="ok"><b>Horario asignado:</b> {staffScanResult.waiver.schedule.date} · {staffScanResult.waiver.schedule.time} · {staffScanResult.waiver.schedule.group}</p>
+              <label class="field-label" for="staffTicketPaperWidth">Ancho del ticket</label>
+              <select id="staffTicketPaperWidth" bind:value={staffTicketPaperWidth}>
+                <option value="58">58 mm</option>
+                <option value="80">80 mm</option>
+              </select>
               <button type="button" on:click={printStaffTicket} disabled={staffTicketBusy || staffScanResult.waiver.status !== "approved"}>
                 {staffTicketBusy ? "Preparando ticket..." : "Imprimir ticket con QR"}
               </button>

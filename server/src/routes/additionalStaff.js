@@ -58,7 +58,7 @@ export function additionalStaffRoutes({ jwtSecret }) {
       if (!additionalAuthorized(waiver, activity)) return res.status(409).json({ error: 'Actividad no autorizada.' });
       await WaiverAuditEvent.create({ waiverId: waiver._id, userId: req.user._id, userRole: req.user.role, action: 'ticket_printed', metadata: { activityId: req.params.activityId } });
       res.json({ ok: true, ticket: { id: waiverDisplayId(waiver), activityId: req.params.activityId, fullName: waiver.participant.fullName, attractionName: activity.attractionName,
-        ...activity.schedule, cityState: waiver.participant.cityState || '', qrToken: waiver.qrToken || req.body.qrToken,
+        ...activity.schedule, cityState: waiver.participant.cityState || '', chihuahuaBenefit: /chihuahua/i.test(String(waiver.participant.cityState || '')), qrToken: waiver.qrToken || req.body.qrToken,
         qrUrl: waiver.qrUrl || `${process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`}/check/${req.body.qrToken}` } });
     } catch (error) { next(error); }
   });
