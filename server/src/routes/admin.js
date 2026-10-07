@@ -246,11 +246,7 @@ export function adminRoutes({ jwtSecret }) {
     if (!current) return res.status(404).json({ error: "Waiver no encontrado." });
 
     const email = String(current.participant?.email || "").trim().toLowerCase();
-    const phone = String(current.participant?.phone || "").trim();
-    const identityQuery = [];
-    if (email) identityQuery.push({ "participant.email": email });
-    if (phone) identityQuery.push({ "participant.phone": phone });
-    const visits = await Waiver.find(identityQuery.length ? { $or: identityQuery } : { _id: current._id })
+    const visits = await Waiver.find(email ? { "participant.email": email } : { _id: current._id })
       .select("_id folio attractionName status createdAt schedule review")
       .sort({ createdAt: -1 })
       .lean();
