@@ -30,6 +30,14 @@ function waiverAdminReportFilter(req) {
     if (req.query.from) query.createdAt.$gte = new Date(req.query.from);
     if (req.query.to) query.createdAt.$lte = new Date(req.query.to);
   }
+  const period = String(req.query.period || "").trim();
+  if (["previous", "active", "upcoming"].includes(period)) {
+    const now = new Date();
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chihuahua" }).format(now);
+    if (period === "previous") query.visitDate = { $lt: today };
+    if (period === "active") query.visitDate = today;
+    if (period === "upcoming") query.visitDate = { $gt: today };
+  }
   const q = String(req.query.q || "").trim();
   if (q) {
     const safe = escapeRegex(q);

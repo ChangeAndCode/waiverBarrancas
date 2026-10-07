@@ -157,7 +157,7 @@
   let adminDeleteRow = null;
   let adminDeleteSuccess = "";
   let adminDeleteBusy = false;
-  let adminReportFilters = { attractionId: "", from: "", to: "", status: "", q: "" };
+  let adminReportFilters = { attractionId: "", from: "", to: "", status: "", period: "", q: "" };
   let adminAttractionEditId = "";
   let editWaiverText = "";
   let editAttractionDescription = "";
@@ -1350,6 +1350,7 @@ async function reviewStaffWaiver(decision) {
     if (adminReportFilters.from) p.set("from", adminReportFilters.from);
     if (adminReportFilters.to) p.set("to", adminReportFilters.to);
     if (adminReportFilters.status) p.set("status", adminReportFilters.status);
+    if (adminReportFilters.period) p.set("period", adminReportFilters.period);
     const qv = adminReportFilters.q.trim();
     if (qv) p.set("q", qv);
     if (includePagination) {
@@ -2153,6 +2154,13 @@ async function reviewStaffWaiver(decision) {
               <option value="approved">Aprobado</option>
               <option value="rejected">Rechazado</option>
               <option value="revoked">Revocado</option>
+            </select>
+            <label class="field-label" for="repPeriod">Relación con la visita</label>
+            <select id="repPeriod" bind:value={adminReportFilters.period}>
+              <option value="">Todas</option>
+              <option value="previous">Anteriores</option>
+              <option value="active">Activas hoy</option>
+              <option value="upcoming">Próximas</option>
             </select>
             <label class="field-label" for="repQ">Buscar</label>
             <input id="repQ" bind:value={adminReportFilters.q} placeholder="Nombre o correo" />
