@@ -148,7 +148,7 @@
   let adminAttractions = [];
   let adminUsers = [];
   let report = { summary: null, byAttraction: [], waivers: [] };
-  let adminReport = { items: [], total: 0, page: 1, pageSize: 25, summary: null };
+  let adminReport = { items: [], total: 0, page: 1, pageSize: 10, summary: null };
   let adminHistory = null;
   let adminRecord = null;
   let adminStatusDrafts = {};
@@ -157,7 +157,7 @@
   let adminDeleteRow = null;
   let adminDeleteSuccess = "";
   let adminDeleteBusy = false;
-  let adminReportFilters = { attractionId: "", from: "", to: "", status: "", q: "" };
+  let adminReportFilters = { attractionId: "", from: "", to: "", status: "", period: "", q: "" };
   let adminAttractionEditId = "";
   let editWaiverText = "";
   let editAttractionDescription = "";
@@ -1350,11 +1350,12 @@ async function reviewStaffWaiver(decision) {
     if (adminReportFilters.from) p.set("from", adminReportFilters.from);
     if (adminReportFilters.to) p.set("to", adminReportFilters.to);
     if (adminReportFilters.status) p.set("status", adminReportFilters.status);
+    if (adminReportFilters.period) p.set("period", adminReportFilters.period);
     const qv = adminReportFilters.q.trim();
     if (qv) p.set("q", qv);
     if (includePagination) {
       p.set("page", String(adminReport.page));
-      p.set("pageSize", String(Number(adminReport.pageSize) || 25));
+      p.set("pageSize", String(Number(adminReport.pageSize) || 10));
     }
     return p.toString();
   }
@@ -1369,7 +1370,7 @@ async function reviewStaffWaiver(decision) {
         items: data.items || [],
         total: data.total ?? 0,
         page: data.page ?? 1,
-        pageSize: data.pageSize ?? 25,
+        pageSize: data.pageSize ?? 10,
         summary: data.summary ?? null
       };
     } catch (e) {
@@ -2154,6 +2155,13 @@ async function reviewStaffWaiver(decision) {
               <option value="rejected">Rechazado</option>
               <option value="revoked">Revocado</option>
             </select>
+            <label class="field-label" for="repPeriod">Relación con la visita</label>
+            <select id="repPeriod" bind:value={adminReportFilters.period}>
+              <option value="">Todas</option>
+              <option value="previous">Anteriores</option>
+              <option value="active">Activas hoy</option>
+              <option value="upcoming">Próximas</option>
+            </select>
             <label class="field-label" for="repQ">Buscar</label>
             <input id="repQ" bind:value={adminReportFilters.q} placeholder="Nombre o correo" />
             <div class="inline-actions filter-actions">
@@ -2325,7 +2333,7 @@ async function reviewStaffWaiver(decision) {
           {/if}
           {#if adminRecord?.data}
             <div class="history-modal-backdrop">
-              <div class="history-modal" role="dialog" aria-modal="true">
+              <div class="history-modal record-modal" role="dialog" aria-modal="true">
                 <div class="history-modal-header">
                   <h3>Expediente de {adminRecord.data.visitor.fullName}</h3>
                   <button type="button" class="secondary history-modal-close" on:click={() => (adminRecord = null)}>×</button>
@@ -2334,9 +2342,27 @@ async function reviewStaffWaiver(decision) {
                 <p><b>Teléfono:</b> {adminRecord.data.visitor.phone}</p>
                 <p><b>Procedencia:</b> {adminRecord.data.visitor.cityState}</p>
                 <h4>Historial de waivers</h4>
-                {#each adminRecord.data.visits as visit}
-                  <div class="history-event"><b>{visit.folio}</b> · {visit.attractionName} · {visit.status} · {new Date(visit.createdAt).toLocaleString("es-MX")}</div>
-                {/each}
+                {#if adminRecord.data.visits.length === 0}
+                  <p>No hay waivers registrados para este correo.</p>
+                {:else}
+                  <div class="record-table-wrap">
+                    <table class="record-table">
+                      <thead>
+                        <tr><th>Folio waiver</th><th>Atracción</th><th>Status</th><th>Fecha</th></tr>
+                      </thead>
+                      <tbody>
+                        {#each adminRecord.data.visits as visit}
+                          <tr>
+                            <td>{visit.folio}</td>
+                            <td>{visit.attractionName}</td>
+                            <td>{visit.status}</td>
+                            <td>{new Date(visit.createdAt).toLocaleString("es-MX")}</td>
+                          </tr>
+                        {/each}
+                      </tbody>
+                    </table>
+                  </div>
+                {/if}
               </div>
             </div>
           {:else if adminHistory?.loading}
@@ -2406,10 +2432,7 @@ async function reviewStaffWaiver(decision) {
                 loadAdminReport();
               }}
             >
-              <option value={25}>25</option>
-              <option value={50}>50</option>
-              <option value={100}>100</option>
-              <option value={200}>200</option>
+              <option value={10}>10</option>
             </select>
           </div>
         {/if}
@@ -3222,7 +3245,8 @@ async function reviewStaffWaiver(decision) {
     margin-top: 4px;
   }
   .table-wrap {
-    overflow-x: auto;
+    max-height: 470px;
+    overflow: auto;
     border: 1px solid #e3d7c4;
     border-radius: 8px;
     background: #fff;
@@ -3644,6 +3668,36 @@ async function reviewStaffWaiver(decision) {
     display: grid;
     gap: 10px;
     margin: 18px 0;
+  }
+  .record-table-wrap {
+    max-height: 280px;
+    overflow: auto;
+    border: 1px solid #e3d7c4;
+    border-radius: 8px;
+    background: #fff;
+  }
+  .history-modal.record-modal {
+    overflow: hidden;
+  }
+  .record-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 560px;
+    font-size: 13px;
+  }
+  .record-table th,
+  .record-table td {
+    padding: 9px 10px;
+    border-bottom: 1px solid #ebdfcc;
+    text-align: left;
+    white-space: nowrap;
+  }
+  .record-table th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: #f0e6d4;
+    color: #1f4a3b;
   }
   .history-event {
     padding: 12px;
