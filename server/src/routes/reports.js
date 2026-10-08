@@ -65,7 +65,7 @@ function staffVisitResult(waiver) {
 
 export function reportRoutes({ jwtSecret }) {
   const router = Router();
-  router.use(requireAuth(jwtSecret), requireRoles("admin", "staff"));
+  router.use(requireAuth(jwtSecret), requireRoles("admin", "staff", "taquilla"));
   router.use(additionalStaffRoutes({ jwtSecret }));
 
   router.post(
@@ -227,7 +227,7 @@ export function reportRoutes({ jwtSecret }) {
     return res.json({ ok: true, attraction: { id: attraction._id, name: attraction.name, code: attraction.code }, safetyVerification: waiver.safetyVerification, alerts: waiverAlerts(waiver, attraction) });
   });
 
-  router.get("/pending", requirePermissions("waiver.read.scanned"), async (req, res) => {
+  router.get("/pending", requireRoles("admin", "staff"), requirePermissions("waiver.read.scanned"), async (req, res) => {
     const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
     const rows = await Waiver.find({ deletedAt: null, status: { $in: ["pending", "signed"] }, ...(req.query.visitDate ? { visitDate: String(req.query.visitDate) } : {}) }).sort({ visitDate: 1, createdAt: 1 }).limit(limit).lean();
     return res.json({ items: rows.map(mapStaffWaiver), total: rows.length });
@@ -300,6 +300,16 @@ router.get("/validate/:token", requirePermissions("waiver.scan"), async (req, re
       operation: "reports_validate_find_by_id",
       durationMs: nowMs() - firstLookupAt
     });
+
+    // Taquilla only reads: notably, legacy GET scanning must NOT consume QR.
+    if (req.user.role === "taquilla") {
+      if (!waiver) return res.status(404).json({ error: "Carta no encontrada." });
+      const result = waiver.visitDate ? visitQrResult(waiver) : {
+        accessAuthorized: waiver.status === "approved" && !waiver.qrConsumedAt && !isWaiverQrExpired(waiver),
+        reason: isWaiverQrExpired(waiver) ? "qr_expired" : waiver.qrConsumedAt ? "qr_already_used" : waiver.status
+      };
+      return res.json({ ...result, valid: true, accessAuthorized: result.accessAuthorized === true, waiver: { ...mapStaffWaiver(waiver), ...result.waiver } });
+    }
 
     // No existe, fue revocado o rechazado.
     if (!waiver || ["revoked", "rejected"].includes(waiver.status)) {
@@ -427,7 +437,7 @@ router.get("/validate/:token", requirePermissions("waiver.scan"), async (req, re
 });
 
 // Explicit Staff action: reading/scanning a new QR never approves or consumes it.
-router.post("/validate/:token", requirePermissions("waiver.scan"), async (req, res) => {
+router.post("/validate/:token", requirePermissions("waiver.scan", "waiver.review", "waiver.schedule.assign"), async (req, res) => {
   let payload;
 
   try {
