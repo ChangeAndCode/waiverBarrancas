@@ -5,6 +5,8 @@
   import waiverIsoEs from "../waiverISOesp.png";
   import waiverIsoEn from "../WaiverISOingles.png";
   import WaiverTextEditor from "./components/WaiverTextEditor.svelte";
+  import { emptyReportFilters } from "./lib/dashboardInteractions.js";
+  import DashboardMetrics from "./components/DashboardMetrics.svelte";
   import WaiverTextView from "./components/WaiverTextView.svelte";
   import { isWaiverTextEmpty } from "./lib/waiverHtml.js";
   import {
@@ -160,7 +162,53 @@
   let adminDeleteRow = null;
   let adminDeleteSuccess = "";
   let adminDeleteBusy = false;
-  let adminReportFilters = { attractionId: "", from: "", to: "", status: "", period: "", q: "" };
+  let adminReportFilters = emptyReportFilters();
+  let dashboardSelection = { granularity: "month", anchor: earliestVisitDate(), followCurrent: true };
+  let adminReportExpectedTotal = null;
+  let adminReportRequestId = 0;
+  function openDashboardReport(event) {
+    if (!hasPermission("admin.panel")) return;
+    adminReportFilters = event.detail.filters;
+    adminReportExpectedTotal = event.detail.expectedTotal;
+    adminReport = { items: [], total: 0, page: 1, pageSize: 10, summary: null };
+    adminTab = "db-report";
+    writeDashboardLocation(true);
+    loadAdminReport();
+  }
+  function resetReportInterval() {
+    adminReportFilters = { ...adminReportFilters, from: "", to: "", until: "" };
+    adminReportExpectedTotal = null;
+  }
+  function writeDashboardLocation(push = false) {
+    const params = new URLSearchParams({ tab: adminTab, dashboardPeriod: dashboardSelection.granularity, dashboardAnchor: dashboardSelection.anchor, dashboardCurrent: String(dashboardSelection.followCurrent) });
+    if (adminTab === "db-report") {
+      for (const [key, value] of Object.entries(adminReportFilters)) if (value) params.set(key, value);
+      params.set("page", String(adminReport.page));
+      if (adminReportExpectedTotal !== null) params.set("expectedTotal", String(adminReportExpectedTotal));
+    }
+    const url = `/admin?${params}`;
+    if (`${window.location.pathname}${window.location.search}` !== url) history[push ? "pushState" : "replaceState"]({}, "", url);
+    query = params;
+  }
+  function returnToDashboard() { adminTab = "dashboard"; writeDashboardLocation(true); }
+  function restoreDashboardLocation() {
+    if (!["dashboard", "db-report"].includes(query.get("tab"))) return;
+    adminTab = query.get("tab");
+    const unit = query.get("dashboardPeriod"), day = query.get("dashboardAnchor");
+    if (["day", "week", "month", "year"].includes(unit) && /^\d{4}-\d{2}-\d{2}$/.test(day || "")) {
+      dashboardSelection = { granularity: unit, anchor: day, followCurrent: query.get("dashboardCurrent") === "true" };
+    }
+    if (adminTab === "db-report") {
+      adminReportFilters = Object.fromEntries(Object.keys(emptyReportFilters()).map(key => [key, query.get(key) || ""]));
+      adminReport = { ...adminReport, page: Math.max(1, Number(query.get("page")) || 1) };
+      const count = query.get("expectedTotal");
+      adminReportExpectedTotal = count !== null && /^\d+$/.test(count) ? Number(count) : null;
+    }
+  }
+  $: if (path === "/admin" && sessionReady && authUser?.role === "admin" && adminTab === "dashboard") {
+    dashboardSelection;
+    writeDashboardLocation();
+  }
   let adminAttractionEditId = "";
   let editWaiverText = "";
   let editAttractionDescription = "";
@@ -181,7 +229,7 @@
   let createAttractionBusy = false;
   let waiverEditorKey = 0;
   let showAdminLogin = false;
-  let adminTab = "attractions";
+  let adminTab = "dashboard";
 
 let form = {
   visitDate: "",
@@ -753,6 +801,10 @@ let form = {
 
   function clearPrivateData() {
     sessionEpoch += 1;
+    adminReportRequestId += 1;
+    adminReportExpectedTotal = null;
+    adminReportFilters = emptyReportFilters();
+    dashboardSelection = { granularity: "month", anchor: earliestVisitDate(), followCurrent: true };
     stopStaffScan();
     staffScanResult = null;
     staffQrToken = "";
@@ -818,15 +870,18 @@ let form = {
     }
   }
 
-  async function api(url, method = "GET", payload) {
+  async function api(url, method = "GET", payload, { signal } = {}) {
+    signal?.throwIfAborted();
     const protectedRequest = url.startsWith("/admin/") || url.startsWith("/reports/");
     if (protectedRequest && await syncSession()) {
       goTo(personnelHome(authUser.role));
       throw new Error("Tu perfil cambió. Consulta tu panel actual.");
     }
+    signal?.throwIfAborted();
     const token = authToken;
     const epoch = sessionEpoch;
     const r = await fetch(`${API_BASE}${url}`, {
+      signal,
       method,
       headers: { "content-type": "application/json", ...authHeaders() },
       body: payload ? JSON.stringify(payload) : undefined
@@ -1434,6 +1489,9 @@ async function reviewStaffWaiver(decision) {
   function adminReportQueryString(includePagination) {
     const p = new URLSearchParams();
     if (adminReportFilters.attractionId) p.set("attractionId", adminReportFilters.attractionId);
+    if (adminReportFilters.attraction) p.set("attraction", adminReportFilters.attraction);
+    if (adminReportFilters.provenance) p.set("provenance", adminReportFilters.provenance);
+    if (adminReportFilters.until) p.set("until", adminReportFilters.until);
     if (adminReportFilters.from) p.set("from", adminReportFilters.from);
     if (adminReportFilters.to) p.set("to", adminReportFilters.to);
     if (adminReportFilters.status) p.set("status", adminReportFilters.status);
@@ -1448,11 +1506,21 @@ async function reviewStaffWaiver(decision) {
   }
 
   async function loadAdminReport() {
+    const requestId = ++adminReportRequestId;
+    const epoch = sessionEpoch;
+    const expected = adminReportExpectedTotal;
     loading = true;
     message = "";
     try {
+      writeDashboardLocation();
       const qs = adminReportQueryString(true);
       const data = await api(`/admin/reports/waivers?${qs}`);
+      if (requestId !== adminReportRequestId || epoch !== sessionEpoch) return;
+      if (expected !== null && data.total !== expected) {
+        adminReport = { ...adminReport, items: [], total: 0, summary: null };
+        message = "Los registros cambiaron desde la consulta de la métrica. Regresa al Dashboard y actualiza antes de abrir el listado nuevamente.";
+        return;
+      }
       adminReport = {
         items: data.items || [],
         total: data.total ?? 0,
@@ -1461,9 +1529,9 @@ async function reviewStaffWaiver(decision) {
         summary: data.summary ?? null
       };
     } catch (e) {
-      message = e.message;
+      if (requestId === adminReportRequestId && epoch === sessionEpoch) message = e.message;
     } finally {
-      loading = false;
+      if (requestId === adminReportRequestId) loading = false;
     }
   }
 
@@ -1490,6 +1558,7 @@ async function reviewStaffWaiver(decision) {
   }
 
   function applyAdminReportFilters() {
+    adminReportExpectedTotal = null;
     adminReport = { ...adminReport, page: 1 };
     loadAdminReport();
   }
@@ -1698,6 +1767,7 @@ async function reviewStaffWaiver(decision) {
 
   async function bootstrap() {
     message = "";
+    if (path === "/admin") restoreDashboardLocation();
     document.documentElement.lang = locale === "en" ? "en" : "es";
     if (authToken && ["/admin", "/staff", "/taquilla"].includes(path)) {
       try { await syncSession(); } catch (error) { message = error.message; return; }
@@ -1713,7 +1783,9 @@ async function reviewStaffWaiver(decision) {
     if (path === "/admin") {
       if (!authToken) return;
       if (!hasPermission("admin.panel")) return goTo(personnelHome(authUser.role));
-      return loadAdminData();
+      await loadAdminData();
+      if (adminTab === "db-report") await loadAdminReport();
+      return;
     }
     if (path === "/success") {
       await loadPublicAttractions();
@@ -1762,7 +1834,7 @@ async function reviewStaffWaiver(decision) {
   bootstrap();
 </script>
 
-<main>
+<main class:metrics-layout={path === "/admin" && adminTab === "dashboard" && sessionReady && hasPermission("admin.panel")}>
   <header>
     <div class="brand">
       <img src={logoBarrancas} alt="Parque Barrancas" class="brand-logo" />
@@ -2058,6 +2130,9 @@ async function reviewStaffWaiver(decision) {
         {#if message}<p>{message}</p>{/if}
 
         <div class="tabs">
+          <button class:tab-active={adminTab === "dashboard"} on:click={returnToDashboard}>
+            Dashboard
+          </button>
           <button class:tab-active={adminTab === "attractions"} on:click={() => (adminTab = "attractions")}>
             Atracciones
           </button>
@@ -2071,6 +2146,7 @@ async function reviewStaffWaiver(decision) {
             class:tab-active={adminTab === "db-report"}
             on:click={() => {
               adminTab = "db-report";
+              adminReportExpectedTotal = null;
               adminReport = { ...adminReport, page: 1 };
               loadAdminReport();
             }}
@@ -2078,6 +2154,12 @@ async function reviewStaffWaiver(decision) {
             Reporte base de datos
           </button>
         </div>
+
+        {#if adminTab === "dashboard" && sessionReady && hasPermission("admin.panel")}
+          {#key sessionEpoch}
+            <DashboardMetrics {api} bind:selection={dashboardSelection} on:openReport={openDashboardReport} />
+          {/key}
+        {/if}
 
         {#if adminTab === "new-attraction"}
           <h3>Nueva atracción</h3>
@@ -2280,21 +2362,39 @@ async function reviewStaffWaiver(decision) {
         {/if}
         {#if adminTab === "db-report"}
           <h3>Reporte base de datos</h3>
+          <button type="button" on:click={returnToDashboard}>Volver al Dashboard</button>
           <p class="muted">
             Filtros aplican a la tabla y al CSV. El archivo incluye hasta 50 mil filas con los mismos filtros (sin imágenes de firma).
           </p>
           <div class="filter-row">
             <label class="field-label" for="repAttr">Atracción</label>
-            <select id="repAttr" bind:value={adminReportFilters.attractionId}>
+            <select id="repAttr" value={adminReportFilters.attraction === "none" ? "none" : adminReportFilters.attractionId} on:change={event => {
+              const value = event.currentTarget.value;
+              adminReportFilters = { ...adminReportFilters, attractionId: value === "none" ? "" : value, attraction: value === "none" ? "none" : "" };
+            }}>
               <option value="">Todas</option>
+              <option value="none">Sin atracción asociada</option>
+              {#if adminReportFilters.attractionId && !adminAttractions.some(a => String(a._id) === adminReportFilters.attractionId)}<option value={adminReportFilters.attractionId}>Atracción fuera del catálogo</option>{/if}
               {#each adminAttractions as a}
                 <option value={a._id}>{a.name}</option>
               {/each}
             </select>
             <label class="field-label" for="repFrom">Desde</label>
-            <input id="repFrom" type="date" bind:value={adminReportFilters.from} />
-            <label class="field-label" for="repTo">Hasta</label>
-            <input id="repTo" type="date" bind:value={adminReportFilters.to} />
+            <input id="repFrom" type={adminReportFilters.until ? "text" : "date"} readonly={Boolean(adminReportFilters.until)} value={adminReportFilters.from} on:input={event => (adminReportFilters = { ...adminReportFilters, from: event.currentTarget.value })} />
+            {#if adminReportFilters.until}
+              <label class="field-label" for="repUntil">Hasta (instante exclusivo)</label>
+              <input id="repUntil" type="text" readonly value={adminReportFilters.until} />
+              <p class="muted">Intervalo exacto de la métrica. Los instantes se expresan en UTC; corresponden al periodo operativo de Chihuahua.</p>
+              <button type="button" on:click={resetReportInterval}>Limpiar intervalo</button>
+            {:else}
+              <label class="field-label" for="repTo">Hasta</label>
+              <input id="repTo" type="date" bind:value={adminReportFilters.to} />
+            {/if}
+            <label class="field-label" for="repProvenance">Procedencia</label>
+            <select id="repProvenance" bind:value={adminReportFilters.provenance}>
+              <option value="">Todas</option>
+              {#each [...MEXICO_STATES, "Extranjero", "Sin procedencia", "Procedencia no clasificable"] as category}<option value={category}>{category}</option>{/each}
+            </select>
             <label class="field-label" for="repSt">Estado</label>
             <select id="repSt" bind:value={adminReportFilters.status}>
               <option value="">Todos</option>
@@ -2302,6 +2402,7 @@ async function reviewStaffWaiver(decision) {
               <option value="approved">Aprobado</option>
               <option value="rejected">Rechazado</option>
               <option value="revoked">Revocado</option>
+              <option value="other">Otros estados históricos</option>
             </select>
             <label class="field-label" for="repPeriod">Relación con la visita</label>
             <select id="repPeriod" bind:value={adminReportFilters.period}>
@@ -2919,6 +3020,9 @@ async function reviewStaffWaiver(decision) {
     max-width: 760px;
     margin: 0 auto;
     padding: 20px;
+  }
+  main.metrics-layout {
+    max-width: 1440px;
   }
   header {
     display: flex;
