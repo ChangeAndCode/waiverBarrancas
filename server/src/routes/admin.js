@@ -1,3 +1,5 @@
+import { waiverAdminReportFilter } from '../lib/waiverReportFilters.js';
+import { dashboardMetrics } from '../lib/dashboardMetrics.js';
 import { validateUserPayload, validUserId, accessChangeError } from "../lib/userAccess.js";
 import { isWaiverQrExpired, qrWriteGuard } from "../lib/waiverValidity.js";
 import { activitySummaries } from "../lib/additionalActivities.js";
@@ -14,41 +16,6 @@ import { WaiverAuditEvent } from "../models/WaiverAuditEvent.js";
 const MAX_CSV_ROWS = 50000;
 const waiverSelectLean =
   "-signatureImage -guardian.signatureImage -witness.signatureImage -waiverTextSnapshot";
-
-function escapeRegex(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function waiverAdminReportFilter(req) {
-  const query = { deletedAt: null };
-  if (req.query.attractionId) query.attractionId = req.query.attractionId;
-  const st = String(req.query.status || "").trim();
-  if (["pending", "approved", "rejected", "revoked"].includes(st)) {
-    query.status = st === "pending" ? { $in: ["pending", "signed"] } : st;
-  }
-  if (req.query.from || req.query.to) {
-    query.createdAt = {};
-    if (req.query.from) query.createdAt.$gte = new Date(req.query.from);
-    if (req.query.to) query.createdAt.$lte = new Date(req.query.to);
-  }
-  const period = String(req.query.period || "").trim();
-  if (["previous", "active", "upcoming"].includes(period)) {
-    const now = new Date();
-    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chihuahua" }).format(now);
-    if (period === "previous") query.visitDate = { $lt: today };
-    if (period === "active") query.visitDate = today;
-    if (period === "upcoming") query.visitDate = { $gt: today };
-  }
-  const q = String(req.query.q || "").trim();
-  if (q) {
-    const safe = escapeRegex(q);
-    query.$or = [
-      { "participant.fullName": { $regex: safe, $options: "i" } },
-      { "participant.email": { $regex: safe, $options: "i" } }
-    ];
-  }
-  return query;
-}
 
 function csvCell(v) {
   const s = v == null ? "" : String(v);
@@ -272,8 +239,13 @@ export function adminRoutes({ jwtSecret }) {
     });
   });
 
+  router.get('/reports/metrics', async (req, res, next) => {
+    try { res.json(await dashboardMetrics(req.query)); } catch (error) { if (error.status === 400) return res.status(400).json({ error: error.message }); next(error); }
+  });
+
   router.get("/reports/waivers", async (req, res) => {
-    const filter = waiverAdminReportFilter(req);
+    let filter;
+    try { filter = waiverAdminReportFilter(req); } catch (error) { return res.status(error.status || 500).json({ error: error.message }); }
     const page = Math.max(1, parseInt(String(req.query.page || "1"), 10) || 1);
     const pageSizeRaw = parseInt(String(req.query.pageSize || "25"), 10) || 25;
     const pageSize = Math.min(200, Math.max(1, pageSizeRaw));
@@ -341,7 +313,8 @@ export function adminRoutes({ jwtSecret }) {
   });
 
   router.get("/reports/waivers/export.csv", async (req, res) => {
-    const filter = waiverAdminReportFilter(req);
+    let filter;
+    try { filter = waiverAdminReportFilter(req); } catch (error) { return res.status(error.status || 500).json({ error: error.message }); }
     const exportAt = nowMs();
     const rows = await Waiver.find(filter)
       .select(waiverSelectLean)
