@@ -20,7 +20,17 @@ function escapeRegex(s) {
 
 function waiverAdminReportFilter(req) {
   const query = { deletedAt: null };
-  if (req.query.attractionId) query.attractionId = req.query.attractionId;
+  if (req.query.attractionId) {
+    query.$and = [{ $or: [
+      { attractionId: req.query.attractionId },
+      { "additionalActivities.attractionId": req.query.attractionId }
+    ] }];
+  }
+  const age = String(req.query.age || "").trim();
+  if (age === "adult") query.isMinor = false;
+  if (age === "minor") query.isMinor = true;
+  const state = String(req.query.state || "").trim();
+  if (state) query["participant.cityState"] = { $regex: `(?:^|,|\\s)${escapeRegex(state)}(?:$|,|\\s)`, $options: "i" };
   const st = String(req.query.status || "").trim();
   if (["pending", "approved", "rejected", "revoked"].includes(st)) {
     query.status = st === "pending" ? { $in: ["pending", "signed"] } : st;
@@ -28,7 +38,11 @@ function waiverAdminReportFilter(req) {
   if (req.query.from || req.query.to) {
     query.createdAt = {};
     if (req.query.from) query.createdAt.$gte = new Date(req.query.from);
-    if (req.query.to) query.createdAt.$lte = new Date(req.query.to);
+    if (req.query.to) {
+      const to = new Date(req.query.to);
+      to.setUTCDate(to.getUTCDate() + 1);
+      query.createdAt.$lt = to;
+    }
   }
   const period = String(req.query.period || "").trim();
   if (["previous", "active", "upcoming"].includes(period)) {
@@ -41,10 +55,12 @@ function waiverAdminReportFilter(req) {
   const q = String(req.query.q || "").trim();
   if (q) {
     const safe = escapeRegex(q);
-    query.$or = [
+    const textMatch = { $or: [
       { "participant.fullName": { $regex: safe, $options: "i" } },
       { "participant.email": { $regex: safe, $options: "i" } }
-    ];
+    ] };
+    if (query.$and) query.$and.push(textMatch);
+    else query.$and = [textMatch];
   }
   return query;
 }
