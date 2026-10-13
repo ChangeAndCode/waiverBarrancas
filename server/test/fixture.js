@@ -1,5 +1,6 @@
 // Isolated fixture: actual Express routes and Mongoose validation; persistence replaced in memory.
 // Never import this module from production code. It does not connect to MongoDB or send mail.
+import { authRoutes } from "../src/routes/auth.js";
 import { recoveryRoutes } from "../src/routes/recovery.js";
 import { WaiverRecovery } from "../src/models/WaiverRecovery.js";
 import express from "express";
@@ -148,30 +149,16 @@ export function testApp(mock) {
     events.push(event);
     return event;
   });
-mock.method(User, "findOne", (filter) => ({
-  select() {
-    return this;
-  },
-  async lean() {
-    const userId = String(filter?._id);
-
-    if (userId === String(staff._id)) {
-      return { ...staff };
+  mock.method(User, "findOne", (filter) => ({
+    select() { return this; },
+    async lean() {
+      const user = [staff, visitor, admin].find(user => matches(user, filter));
+      return user ? { ...user } : null;
     }
-
-    if (userId === String(visitor._id)) {
-      return { ...visitor };
-    }
-
-    if (userId === String(admin._id)) {
-      return { ...admin };
-    }
-
-    return null;
-  }
-}));
+  }));
   const app = express();
   app.use(express.json({ limit: "12mb" }));
+  app.use("/api/auth", authRoutes({ jwtSecret: secret }));
   app.use("/api/public/recovery", recoveryRoutes({ jwtSecret: secret }));
   app.use("/api/public", publicRoutes({ jwtSecret: secret }));
   app.use("/api/reports", reportRoutes({ jwtSecret: secret }));

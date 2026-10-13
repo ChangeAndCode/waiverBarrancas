@@ -13,7 +13,7 @@
     citiesForState,
     buildCityStateLabel
   } from "./lib/locationOptions.js";
-  import { collectWaiverFieldErrors } from "./lib/waiverFormValidation.js";
+  import { collectWaiverFieldErrors, PHONE_MIN_LENGTH } from "./lib/waiverFormValidation.js";
   import { getMessages, NATIONALITY_EN } from "./lib/i18n.js";
   import { WAIVER_TEXT_EN_HTML } from "./lib/waiverTextEn.js";
 
@@ -42,10 +42,13 @@
   let witnessSignatureCanvas;
   let witnessSignatureHasStroke = false;
 
+  let sessionEpoch = 0;
+  let sessionReady = false;
   let authToken = localStorage.getItem("authToken") || "";
   let authUser = JSON.parse(localStorage.getItem("authUser") || "null");
 
   const ROLE_PERMISSIONS = {
+    taquilla: ["auth.login", "waiver.scan", "waiver.read.scanned"],
     staff: [
       "auth.login",
       "waiver.scan",
@@ -164,6 +167,10 @@
   let editStripeEnabled = false;
   let newUser = { name: "", email: "", password: "", role: "staff" };
   let showCreateUserModal = false;
+  let editingUserId = "";
+  let userConfirmation = null;
+  let userActionBusy = false;
+  let userActionError = "";
   let createUserSuccess = "";
   let createUserError = "";
   let createUserBusy = false;
@@ -219,7 +226,7 @@ let form = {
   $: availableCities = citiesForState(selectedState);
   $: L = getMessages(locale);
   $: isPublicWaiverUi =
-    !path.startsWith("/check/") && path !== "/staff" && path !== "/admin";
+    !path.startsWith("/check/") && path !== "/staff" && path !== "/taquilla" && path !== "/admin";
   $: selectedAttractions = attractions.filter((a) => selectedParkAttractions[a._id]);
   $: selectedAttraction = selectedAttractions[0] || attractions[0] || null;
   $: displayWaiverText =
@@ -744,24 +751,96 @@ let form = {
     return authToken ? { authorization: `Bearer ${authToken}` } : {};
   }
 
-  async function api(url, method = "GET", payload) {
-  const r = await fetch(`${API_BASE}${url}`, {
-    method,
-    headers: { "content-type": "application/json", ...authHeaders() },
-    body: payload ? JSON.stringify(payload) : undefined
-  });
-
-  const contentType = r.headers.get("content-type") || "";
-  const isJson = contentType.includes("application/json");
-  const data = isJson ? await r.json() : await r.text();
-
-  if (!r.ok) {
-    if (isJson && data?.error) throw new Error(data.error);
-    throw new Error(typeof data === "string" ? data : "Error");
+  function clearPrivateData() {
+    sessionEpoch += 1;
+    stopStaffScan();
+    staffScanResult = null;
+    staffQrToken = "";
+    staffScanPaste = "";
+    staffReviewComment = "";
+    staffWeightDraft = "";
+    staffWeightComment = "";
+    additionalDrafts = {};
+    adminUsers = [];
+    adminAttractions = [];
+    adminHistory = null;
+    adminRecord = null;
+    adminDeleteRow = null;
+    adminStatusEditRow = null;
+    adminStatusDrafts = {};
+    adminStatusComments = {};
+    showCreateAttractionModal = false;
+    adminAttractionEditId = "";
+    editWaiverText = "";
+    editAttractionDescription = "";
+    showCreateUserModal = false;
+    newUser = { name: "", email: "", password: "", role: "staff" };
+    userConfirmation = null;
+    report = { summary: null, byAttraction: [], waivers: [] };
+    adminReport = { items: [], total: 0, page: 1, pageSize: 10, summary: null };
   }
 
-  return data;
-}
+  function personnelHome(role) {
+    return role === "admin" ? "/admin" : role === "taquilla" ? "/taquilla" : "/staff";
+  }
+
+  async function syncSession() {
+    if (!authToken) return;
+    const token = authToken;
+    const r = await fetch(`${API_BASE}/auth/me`, { headers: { authorization: `Bearer ${token}` } });
+    if (token !== authToken) throw new Error("La sesión cambió.");
+    if (!r.ok) {
+      if (r.status === 401) { endExpiredSession(); throw new Error("La sesión terminó. Inicia sesión nuevamente."); }
+      clearPrivateData();
+      throw new Error("No se pudo verificar la sesión.");
+    }
+    const user = await r.json();
+    if (token !== authToken) throw new Error("La sesión cambió.");
+    const changed = authUser?.role !== user.role;
+    if (changed) clearPrivateData();
+    saveAuth(token, user);
+    sessionReady = true;
+    return changed;
+  }
+
+  function endExpiredSession() {
+    logout();
+    goTo("/admin");
+    message = "La sesión terminó. Inicia sesión nuevamente.";
+  }
+
+  async function handleAccessError(status) {
+    if (status === 401) endExpiredSession();
+    if (status === 403) {
+      clearPrivateData();
+      await syncSession();
+      if (authUser) goTo(personnelHome(authUser.role));
+    }
+  }
+
+  async function api(url, method = "GET", payload) {
+    const protectedRequest = url.startsWith("/admin/") || url.startsWith("/reports/");
+    if (protectedRequest && await syncSession()) {
+      goTo(personnelHome(authUser.role));
+      throw new Error("Tu perfil cambió. Consulta tu panel actual.");
+    }
+    const token = authToken;
+    const epoch = sessionEpoch;
+    const r = await fetch(`${API_BASE}${url}`, {
+      method,
+      headers: { "content-type": "application/json", ...authHeaders() },
+      body: payload ? JSON.stringify(payload) : undefined
+    });
+    if (protectedRequest && (token !== authToken || epoch !== sessionEpoch)) throw new Error("La sesión cambió.");
+    const isJson = (r.headers.get("content-type") || "").includes("application/json");
+    const data = isJson ? await r.json() : await r.text();
+    if (protectedRequest && (token !== authToken || epoch !== sessionEpoch)) throw new Error("La sesión cambió.");
+    if (!r.ok) {
+      if (protectedRequest) await handleAccessError(r.status);
+      throw new Error(isJson && data?.error ? data.error : typeof data === "string" ? data : "Error");
+    }
+    return data;
+  }
 
   async function loadPublicAttractions() {
     attractions = await api("/public/attractions");
@@ -975,6 +1054,8 @@ async function handleCancelledPayment() {
   }
 
   function logout() {
+    sessionReady = false;
+    clearPrivateData();
     authToken = "";
     authUser = null;
     localStorage.removeItem("authToken");
@@ -989,7 +1070,7 @@ async function handleCancelledPayment() {
       const data = await api("/auth/login", "POST", loginForm);
       saveAuth(data.token, data.user);
       const next = query.get("next");
-      goTo(next || (data.user.role === "admin" ? "/admin" : "/staff"));
+      goTo(data.user.role === "taquilla" ? "/taquilla" : (["/admin", "/staff"].includes(next) ? next : personnelHome(data.user.role)));
     } catch (e) {
       message = e.message;
     } finally {
@@ -1037,7 +1118,7 @@ async function handleCancelledPayment() {
   onDestroy(() => clearTimeout(qrExpiryTimer));
   onDestroy(stopStaffScan);
 
-  $: if (!(path === "/staff" && authToken)) stopStaffScan();
+  $: if (!(["/staff", "/taquilla"].includes(path) && authToken)) stopStaffScan();
 
   async function staffConsumeQrFromRaw(raw) {
     if (staffScanBusy) return;
@@ -1066,6 +1147,12 @@ async function handleCancelledPayment() {
       staffScanBusy = false;
     }
   }
+
+function displayVisitorPhone(value) {
+  if (typeof value !== "string") return "No disponible";
+  const text = value.trim();
+  return text.length >= PHONE_MIN_LENGTH && /\d/.test(text) ? text : "No disponible";
+}
 
 function statusLabel(status) {
   return ({
@@ -1423,11 +1510,14 @@ async function reviewStaffWaiver(decision) {
   async function downloadAdminReportCsv() {
     message = "";
     try {
+      if (await syncSession()) { goTo(personnelHome(authUser.role)); return; }
+      const epoch = sessionEpoch;
       const qs = adminReportQueryString(false);
       const r = await fetch(`${API_BASE}/admin/reports/waivers/export.csv?${qs}`, {
         headers: { ...authHeaders() }
       });
       if (!r.ok) {
+        await handleAccessError(r.status);
         let err = "Error al descargar CSV.";
         try {
           const j = await r.json();
@@ -1438,6 +1528,7 @@ async function reviewStaffWaiver(decision) {
         throw new Error(err);
       }
       const blob = await r.blob();
+      if (epoch !== sessionEpoch || !hasPermission("waiver.export")) return;
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -1537,31 +1628,25 @@ async function reviewStaffWaiver(decision) {
   }
 
   async function createUser() {
-    message = "";
     createUserError = "";
-    if (!newUser.name.trim() || !newUser.email.trim() || !newUser.password.trim() || !newUser.role) {
-      createUserError = "Completa todos los campos para crear el usuario.";
-      return;
-    }
     if (createUserBusy) return;
     createUserBusy = true;
     try {
-      await api("/admin/users", "POST", newUser);
-      createUserSuccess = `Usuario ${newUser.name.trim()} creado con éxito.`;
+      const payload = { ...newUser };
+      if (editingUserId && !payload.password) delete payload.password;
+      await api(editingUserId ? `/admin/users/${editingUserId}` : "/admin/users", editingUserId ? "PATCH" : "POST", payload);
+      if (authToken) await syncSession();
+      showCreateUserModal = false;
       newUser = { name: "", email: "", password: "", role: "staff" };
-      await loadAdminData();
-      setTimeout(() => {
-        showCreateUserModal = false;
-        createUserSuccess = "";
-        createUserBusy = false;
-      }, 2000);
-    } catch (e) {
-      createUserError = e.message;
-      createUserBusy = false;
-    }
+      adminUsers = await api("/admin/users");
+      message = "Usuario guardado.";
+    } catch (e) { createUserError = e.message; }
+    finally { createUserBusy = false; }
   }
 
-  function openCreateUserModal() {
+  function openCreateUserModal(user = null) {
+    editingUserId = user?._id || "";
+    newUser = user ? { name: user.name, email: user.email, password: "", role: user.role } : { name: "", email: "", password: "", role: "staff" };
     createUserError = "";
     createUserSuccess = "";
     showCreateUserModal = true;
@@ -1570,12 +1655,20 @@ async function reviewStaffWaiver(decision) {
   function closeCreateUserModal() {
     if (createUserBusy) return;
     showCreateUserModal = false;
-    createUserError = "";
+    newUser.password = "";
   }
 
-  async function toggleUser(user) {
-    await api(`/admin/users/${user._id || user.id}`, "PATCH", { active: !user.active });
-    await loadAdminData();
+  async function changeUserAccess(user, action) {
+    if (userActionBusy) return;
+    userActionBusy = true;
+    userActionError = "";
+    try {
+      await api(`/admin/users/${user._id}`, action === "delete" ? "DELETE" : "PATCH", action === "delete" ? undefined : { active: action === "reactivate" });
+      userConfirmation = null;
+      adminUsers = await api("/admin/users");
+      message = "Acceso actualizado.";
+    } catch (e) { userActionError = e.message; message = e.message; }
+    finally { userActionBusy = false; }
   }
 
   function openAdminDeleteModal(row) {
@@ -1606,16 +1699,20 @@ async function reviewStaffWaiver(decision) {
   async function bootstrap() {
     message = "";
     document.documentElement.lang = locale === "en" ? "en" : "es";
+    if (authToken && ["/admin", "/staff", "/taquilla"].includes(path)) {
+      try { await syncSession(); } catch (error) { message = error.message; return; }
+    }
     showAdminLogin = path === "/admin" && (!authToken || authUser?.role !== "admin");
     if (path.startsWith("/check/")) return loadCheck();
-    if (path === "/staff") {
-      if (!authToken) return goTo("/admin?next=/staff");
+    if (path === "/staff" || path === "/taquilla") {
+      if (!authToken) return goTo(`/admin?next=${path}`);
       if (!hasPermission("waiver.scan")) return goTo("/");
+      if (authUser?.role === "taquilla" && path !== "/taquilla") return goTo("/taquilla");
       return;
     }
     if (path === "/admin") {
       if (!authToken) return;
-      if (!hasPermission("admin.panel")) return goTo("/staff");
+      if (!hasPermission("admin.panel")) return goTo(personnelHome(authUser.role));
       return loadAdminData();
     }
     if (path === "/success") {
@@ -1652,6 +1749,15 @@ async function reviewStaffWaiver(decision) {
     adminStatusDrafts = { ...adminStatusDrafts, [row.databaseId]: row.status === "signed" ? "pending" : row.status };
     adminStatusComments = { ...adminStatusComments, [row.databaseId]: "" };
   }
+
+  async function refreshPersonnelSession() {
+    if (!authToken || !["/admin", "/staff", "/taquilla"].includes(path)) return;
+    try {
+      if (await syncSession()) goTo(personnelHome(authUser.role));
+    } catch (error) { message = error.message; }
+  }
+  window.addEventListener("focus", refreshPersonnelSession);
+  onDestroy(() => window.removeEventListener("focus", refreshPersonnelSession));
 
   bootstrap();
 </script>
@@ -1757,17 +1863,18 @@ async function reviewStaffWaiver(decision) {
         <p>{message || "No se pudo mostrar el código."}</p>
       {/if}
     </section>
-  {:else if path === "/staff"}
+  {:else if (path === "/staff" || path === "/taquilla") && authToken && sessionReady && hasPermission("waiver.scan")}
     <section class="card">
-      <h2>Panel Staff</h2>
+      <h2>{authUser?.role === "taquilla" ? "Panel Taquilla" : "Panel Staff"}</h2>
       <p>Usuario: {authUser?.name} ({authUser?.role})</p>
+      {#if authUser?.role === "taquilla"}<p class="muted">Escanea o pega el QR para consultar la carta y los datos del visitante.</p>{:else}
       <p class="muted">
         Consulta la carta con la cámara o pegando el enlace. Para las visitas nuevas, revisa la carta y
         confirma disponibilidad antes de asignar el horario general y validar. El QR puede consultarse nuevamente durante su vigencia.
         Los registros anteriores mantienen su validación de un solo uso.
-      </p>
+      </p>{/if}
 
-      <h3>Validar QR</h3>
+      <h3>Consultar QR</h3>
       {#if staffScanError}<p class="bad">{staffScanError}</p>{/if}
       <video bind:this={staffScanVideoEl} class="staff-scan-video" playsinline muted></video>
       <div class="inline-actions staff-scan-actions">
@@ -1780,7 +1887,7 @@ async function reviewStaffWaiver(decision) {
       <label class="field-label" for="staffPaste">Pegar URL o token del QR</label>
       <textarea id="staffPaste" bind:value={staffScanPaste} rows="2" placeholder="https://…/check/…"></textarea>
       <button type="button" on:click={() => staffConsumeQrFromRaw(staffScanPaste)} disabled={staffScanBusy}>
-        {staffScanBusy ? "Validando…" : "Validar pegado"}
+        {staffScanBusy ? "Consultando…" : "Consultar QR"}
       </button>
       <button type="button" class="secondary" on:click={() => { staffScanResult = null; staffScanError = ""; }}>
         Limpiar resultado
@@ -1794,7 +1901,12 @@ async function reviewStaffWaiver(decision) {
           <p><b>Nombre:</b> {staffScanResult.waiver.fullName}</p>
           <p><b>Atracción:</b> {staffScanResult.waiver.attractionName}</p>
            <p><b>Correo:</b> {staffScanResult.waiver.participant?.email}</p>
-           <p><b>Teléfono:</b> {staffScanResult.waiver.participant?.phone}</p>
+           <p><b>Teléfono:</b> {displayVisitorPhone(staffScanResult.waiver.participant?.phone)}</p>
+           {#if authUser?.role === "taquilla"}
+             <p><b>Costo:</b> Costo no disponible</p>
+             {#if staffScanResult.reason === "qr_expired"}<p class="bad">Vigencia vencida</p>{/if}
+             {#if staffScanResult.reason === "qr_already_used"}<p class="bad">QR utilizado previamente</p>{/if}
+           {/if}
            <p><b>Estado de procedencia:</b> {staffScanResult.waiver.participant?.cityState}</p>
            <details>
              <summary>Ver carta responsiva completa</summary>
@@ -1809,6 +1921,7 @@ async function reviewStaffWaiver(decision) {
                  {#each staffScanResult.waiver.alerts as alert}<p>{alert.message}</p>{/each}
                </div>
              {:else}<p class="ok">Sin alertas automáticas.</p>{/if}
+             {#if hasPermission("waiver.review")}
              <div class="schedule-box verification-box">
                <div class="verification-field">
                  <label class="field-label" for="staffWeight">Peso verificado (kg)</label>
@@ -1823,9 +1936,11 @@ async function reviewStaffWaiver(decision) {
                  <p><b>Resultado:</b> {staffScanResult.waiver.safetyVerification.weightStatus}</p>
                {/if}
              </div>
+             {/if}
              <p><b>Firma registrada:</b> {staffScanResult.waiver.hasSignature ? "Sí" : "No"}</p>
              <p><b>Firma de testigo:</b> {staffScanResult.waiver.witness?.hasSignature ? "Sí" : "No"}</p>
           </details>
+           {#if hasPermission("waiver.review")}
            {#if false && staffScanResult.waiver.visitDate}
             <p><b>Día de visita:</b> {staffScanResult.waiver.visitDate}</p>
             <p><b>Horario general (Chihuahua):</b> {parkDateTimeLabel(staffScanResult.waiver.assignedAt)}</p>
@@ -1887,13 +2002,14 @@ async function reviewStaffWaiver(decision) {
               <button type="button" class="secondary" on:click={() => reviewStaffWaiver("rejected")} disabled={staffReviewBusy}>Rechazar waiver</button>
             </div>
           {/if}
+          {/if}
           <h3>{L.additionalActivities}</h3>
           {#each staffScanResult.additionalActivities || [] as activity}
             <div class="schedule-box">
               <h4>{activity.attractionName} — {statusLabel(activity.status)}</h4>
               <p>{activity.accessAuthorized ? L.activityAuthorized : L.activityUnauthorized}</p>
               {#if activity.review?.comment}<p>{activity.review.comment}</p>{/if}
-              {#if activity.status === "pending"}
+              {#if activity.status === "pending" && hasPermission("waiver.review")}
                 {@const draft = additionalDrafts[activity.id] || { date: staffScanResult.waiver.visitDate, time: "", group: "", comment: "" }}
                 <label>{L.visitDate}<input type="date" value={draft.date} on:input={e => additionalDrafts = { ...additionalDrafts, [activity.id]: { ...draft, date: e.target.value } }} /></label>
                 <label>{L.activityTime}<input type="time" value={draft.time} on:input={e => additionalDrafts = { ...additionalDrafts, [activity.id]: { ...draft, time: e.target.value } }} /></label>
@@ -1904,7 +2020,7 @@ async function reviewStaffWaiver(decision) {
               {:else if activity.schedule}
                 <p>{activity.schedule.date} · {activity.schedule.time} · {activity.schedule.group}</p>
               {/if}
-              {#if activity.accessAuthorized}<button disabled={staffTicketBusy} on:click={() => printStaffTicket(activity.id)}>{L.activityPrint}</button>{/if}
+              {#if activity.accessAuthorized && hasPermission("waiver.ticket.print")}<button disabled={staffTicketBusy} on:click={() => printStaffTicket(activity.id)}>{L.activityPrint}</button>{/if}
             </div>
           {/each}
           <p><b>Folio:</b> {staffScanResult.waiver.id}</p>
@@ -1925,11 +2041,13 @@ async function reviewStaffWaiver(decision) {
         </div>
       {/if}
 
-      <h3>Últimos registros</h3>
+      {#if authUser?.role !== "taquilla"}<h3>Últimos registros</h3>{/if}
     </section>
   {:else if path === "/admin"}
     <section class="card">
-      {#if showAdminLogin}
+      {#if authToken && !sessionReady}
+        <p>Verificando sesión…</p>
+      {:else if showAdminLogin}
         <h2>Acceso Admin</h2>
         {#if message}<p class="bad">{message}</p>{/if}
         <input bind:value={loginForm.email} placeholder="Correo electrónico" />
@@ -2061,19 +2179,7 @@ async function reviewStaffWaiver(decision) {
         {/if}
 
         {#if adminTab === "users"}
-          <button type="button" class="create-user-trigger" on:click={openCreateUserModal}>Crear usuario</button>
-          <!-- El formulario de alta se muestra en un modal. -->
-          <!--
-          <h3>Crear usuario</h3>
-          <input bind:value={newUser.name} placeholder="Nombre" />
-          <input bind:value={newUser.email} placeholder="Correo electrónico" />
-          <input bind:value={newUser.password} type="password" placeholder="Contraseña" />
-          <select bind:value={newUser.role}>
-            <option value="staff">staff</option>
-            <option value="admin">admin</option>
-          </select>
-          <button on:click={createUser}>Crear usuario</button> -->
-
+          <button type="button" class="create-user-trigger" on:click={() => openCreateUserModal()}>Crear usuario</button>
           {#if showCreateUserModal}
             <div
               class="status-modal-backdrop"
@@ -2083,26 +2189,50 @@ async function reviewStaffWaiver(decision) {
             >
               <div class="status-modal create-user-modal" role="dialog" aria-modal="true" aria-labelledby="create-user-modal-title">
                 <div class="history-modal-header">
-                  <h3 id="create-user-modal-title">Crear usuario</h3>
+                  <h3 id="create-user-modal-title">{editingUserId ? "Editar usuario" : "Crear usuario"}</h3>
                 </div>
                 {#if createUserSuccess}
                   <p class="delete-success">{createUserSuccess}</p>
                 {:else}
-                  <input bind:value={newUser.name} placeholder="Nombre" required />
-                  <input bind:value={newUser.email} type="email" placeholder="Correo electrónico" required />
-                  <input bind:value={newUser.password} type="password" placeholder="Contraseña" required />
-                  <select bind:value={newUser.role} required>
-                    <option value="staff">staff</option>
-                    <option value="admin">admin</option>
-                  </select>
+                  <div class="user-form-fields">
+                    <label>Nombre<input bind:value={newUser.name} placeholder="Nombre" maxlength="150" required /></label>
+                    <label>Correo electrónico<input bind:value={newUser.email} type="email" placeholder="Correo electrónico" maxlength="254" required /></label>
+                    <div class="user-password-field">
+                      <label>{editingUserId ? "Contraseña (opcional)" : "Contraseña"}<input bind:value={newUser.password} type="password" placeholder={editingUserId ? "Nueva contraseña" : "Mínimo 6 caracteres"} autocomplete="new-password" aria-describedby="user-password-help" /></label>
+                      <div id="user-password-help" class="user-password-help muted">
+                        {#if editingUserId}<p>Deja este campo vacío para conservar la contraseña actual</p>{/if}
+                        <p>Mínimo 6 caracteres, máximo 72 bytes. Al cambiarla se requiere un nuevo login.</p>
+                      </div>
+                    </div>
+                    <label class="user-role-field">Perfil<select bind:value={newUser.role} required>
+                      <option value="staff">Staff</option>
+                      <option value="admin">Administrador</option>
+                      <option value="taquilla">Taquilla</option>
+                    </select></label>
+                  </div>
                   {#if createUserError}<p class="bad">{createUserError}</p>{/if}
                   <div class="history-modal-footer">
-                    <button type="button" on:click={createUser} disabled={createUserBusy || !newUser.name.trim() || !newUser.email.trim() || !newUser.password.trim()}>
-                      {createUserBusy ? "Creando..." : "Crear usuario"}
+                    <button type="button" on:click={createUser} disabled={createUserBusy || !newUser.name.trim() || !newUser.email.trim() || (!editingUserId && !newUser.password.trim())}>
+                      {createUserBusy ? "Guardando..." : "Guardar usuario"}
                     </button>
                     <button type="button" class="secondary" on:click={closeCreateUserModal} disabled={createUserBusy}>Cancelar</button>
                   </div>
                 {/if}
+              </div>
+            </div>
+          {/if}
+
+          {#if userConfirmation}
+            <div class="status-modal-backdrop" role="presentation">
+              <div class="status-modal" role="dialog" aria-modal="true" aria-labelledby="user-confirm-title">
+                <h3 id="user-confirm-title">{userConfirmation.action === "delete" ? "Eliminar acceso" : "Suspender acceso"}</h3>
+                <p>Confirma la acción para {userConfirmation.user.name} ({userConfirmation.user.email}).</p>
+                <p>{userConfirmation.action === "delete" ? "Se conservará el historial y no podrá reactivarse mediante las operaciones normales." : "Dejará de tener acceso y deberá iniciar sesión nuevamente después de reactivarlo."}</p>
+                {#if userActionError}<p class="bad" role="alert">{userActionError}</p>{/if}
+                <div class="history-modal-footer">
+                  <button disabled={userActionBusy} on:click={() => changeUserAccess(userConfirmation.user, userConfirmation.action)}>Confirmar</button>
+                  <button class="secondary" disabled={userActionBusy} on:click={() => userConfirmation = null}>Cancelar</button>
+                </div>
               </div>
             </div>
           {/if}
@@ -2113,11 +2243,29 @@ async function reviewStaffWaiver(decision) {
             <div class="item admin-data-row admin-user-row">
               <div class="admin-user-name">{user.name}</div>
               <div class="admin-user-email">{user.email}</div>
-              <div class="admin-user-role">{user.role}</div>
-              <div class="admin-user-status">{user.active ? "Activo" : "Inactivo"}</div>
-              <button type="button" class:activate-icon-button={!user.active} class:deactivate-icon-button={user.active} class="icon-button" title={user.active ? "Desactivar" : "Activar"} aria-label={`${user.active ? "Desactivar" : "Activar"} ${user.name}`} on:click={() => toggleUser(user)}>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9"></path><path d="M6.4 6.4a8 8 0 1 0 11.2 0"></path></svg>
-              </button>
+              <div class="admin-user-role">{({ admin: "Administrador", staff: "Staff", taquilla: "Taquilla" })[user.role]}</div>
+              <div class="admin-user-status">{user.deletedAt ? "Eliminado" : user.active ? "Activo" : "Suspendido"}</div>
+              <div class="user-actions">
+                {#if !user.deletedAt}
+                  <button type="button" class="icon-button status-edit-button" title="Editar usuario" aria-label={`Editar usuario ${user.name}`} on:click={() => openCreateUserModal(user)}>
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m4 17.5-.8 3.3 3.3-.8L18.8 7.7a2.8 2.8 0 0 0-4-4L2.5 16Z"></path><path d="m13.8 5.8 4.4 4.4"></path></svg>
+                  </button>
+                  {#if String(user._id) !== String(authUser?.id)}
+                    {#if user.active}
+                      <button type="button" class="icon-button deactivate-icon-button" title="Suspender acceso" aria-label={`Suspender acceso de ${user.name}`} on:click={() => { userActionError = ""; userConfirmation = { user, action: "suspend" }; }}>
+                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3v9"></path><path d="M6.4 6.4a8 8 0 1 0 11.2 0"></path></svg>
+                      </button>
+                    {:else}
+                      <button type="button" class="icon-button activate-icon-button" title="Reactivar acceso" aria-label={`Reactivar acceso de ${user.name}`} disabled={userActionBusy} on:click={() => changeUserAccess(user, "reactivate")}>
+                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3v9"></path><path d="M6.4 6.4a8 8 0 1 0 11.2 0"></path></svg>
+                      </button>
+                    {/if}
+                    <button type="button" class="icon-button delete-icon-button" title="Eliminar acceso" aria-label={`Eliminar acceso de ${user.name}`} on:click={() => { userActionError = ""; userConfirmation = { user, action: "delete" }; }}>
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7h16"></path><path d="M9 7V4h6v3"></path><path d="m7 7 1 13h8l1-13"></path><path d="M10 11v5M14 11v5"></path></svg>
+                    </button>
+                  {/if}
+                {/if}
+              </div>
             </div>
           {/each}
         {/if}
@@ -3364,6 +3512,50 @@ async function reviewStaffWaiver(decision) {
     background: #1f4a3b;
     color: #fff;
   }
+  .status-modal.create-user-modal {
+    width: min(640px, 100%);
+    max-height: calc(100dvh - 40px);
+    overflow-y: auto;
+    box-sizing: border-box;
+  }
+  .user-form-fields {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+  .user-form-fields label {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+  }
+  .user-form-fields input,
+  .user-form-fields select {
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    box-sizing: border-box;
+  }
+  .user-password-help {
+    font-size: 13px;
+    line-height: 1.5;
+    margin-top: 8px;
+  }
+  .user-password-help p { margin: 0; }
+  .user-password-help p + p { margin-top: 6px; }
+  .user-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+  }
+  @media (min-width: 600px) {
+    .user-form-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .user-password-field,
+    .user-role-field { grid-column: 1 / -1; }
+  }
+  @media (max-width: 620px) {
+    .user-actions { justify-content: flex-start; }
+  }
   .create-user-trigger {
     margin-top: 24px;
     margin-bottom: 12px;
@@ -3548,7 +3740,7 @@ async function reviewStaffWaiver(decision) {
   }
   .user-table-header,
   .admin-user-row {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) 90px 100px 112px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) 110px 100px 142px;
   }
   .admin-user-row > div {
     min-width: 0;
@@ -3560,9 +3752,7 @@ async function reviewStaffWaiver(decision) {
   .admin-user-status {
     text-align: center;
   }
-  .admin-user-row > .icon-button {
-    justify-self: center;
-  }
+
   .admin-table-header span:last-child {
     text-align: center;
   }

@@ -1,3 +1,4 @@
+import { validateUserPayload, validUserId, accessChangeError } from "../lib/userAccess.js";
 import { isWaiverQrExpired, qrWriteGuard } from "../lib/waiverValidity.js";
 import { activitySummaries } from "../lib/additionalActivities.js";
 import { Router } from "express";
@@ -439,51 +440,67 @@ export function adminRoutes({ jwtSecret }) {
     res.send(body);
   });
 
-  router.get("/users", async (_req, res) => {
-    const users = await User.find().sort({ createdAt: -1 }).select("-passwordHash").lean();
-    res.json(users);
+  router.get("/users", async (_req, res, next) => {
+    try {
+      res.json(await User.find().sort({ createdAt: -1 }).select("-passwordHash -authVersion").lean());
+    } catch (error) { next(error); }
   });
 
-  router.post("/users", async (req, res) => {
-    const name = String(req.body?.name || "").trim();
-    const email = String(req.body?.email || "").toLowerCase().trim();
-    const password = String(req.body?.password || "");
-    const role = req.body?.role;
-
-    if (!name || !email || !password || !["admin", "staff"].includes(role)) {
-      return res.status(400).json({ error: "Datos de usuario inválidos." });
+  router.post("/users", async (req, res, next) => {
+    try {
+      const error = validateUserPayload(req.body, true);
+      if (error) return res.status(400).json({ error });
+      const { name, password, role } = req.body;
+      const email = req.body.email.toLowerCase().trim();
+      if (await User.findOne({ email })) return res.status(409).json({ error: "Ese correo ya está registrado." });
+      const created = await User.create({ name: name.trim(), email, role, passwordHash: await bcrypt.hash(password, 10), active: true });
+      return res.status(201).json({ id: created._id, name: created.name, email: created.email, role: created.role, active: created.active, deletedAt: created.deletedAt });
+    } catch (error) {
+      if (error.code === 11000) return res.status(409).json({ error: "Ese correo ya está registrado." });
+      next(error);
     }
-
-    const exists = await User.findOne({ email });
-    if (exists) return res.status(409).json({ error: "Ese correo ya está registrado." });
-
-    const passwordHash = await bcrypt.hash(password, 10);
-    const created = await User.create({ name, email, passwordHash, role, active: true });
-    res.status(201).json({
-      id: created._id,
-      name: created.name,
-      email: created.email,
-      role: created.role,
-      active: created.active
-    });
   });
 
-  router.patch("/users/:id", async (req, res) => {
-    const payload = {};
-    if (typeof req.body?.name === "string") payload.name = req.body.name.trim();
-    if (typeof req.body?.active === "boolean") payload.active = req.body.active;
-    if (typeof req.body?.role === "string" && ["admin", "staff"].includes(req.body.role)) {
-      payload.role = req.body.role;
+  router.patch("/users/:id", async (req, res, next) => {
+    try {
+      if (!validUserId(req.params.id)) return res.status(400).json({ error: "ID inválido." });
+      const error = validateUserPayload(req.body);
+      if (error) return res.status(400).json({ error });
+      const user = await User.findOne({ _id: req.params.id, deletedAt: null }).lean();
+      if (!user) return res.status(404).json({ error: "Usuario no encontrado." });
+      const protection = await accessChangeError(req.user, user, req.body);
+      if (protection) return res.status(409).json({ error: protection });
+      const payload = {};
+      for (const field of ["name", "email", "role", "active"]) if (field in req.body) payload[field] = req.body[field];
+      if (payload.name !== undefined) payload.name = payload.name.trim();
+      if (payload.email !== undefined) {
+        payload.email = payload.email.toLowerCase().trim();
+        if (await User.findOne({ email: payload.email, _id: { $ne: user._id } })) return res.status(409).json({ error: "Ese correo ya está registrado." });
+      }
+      if (req.body.password !== undefined) payload.passwordHash = await bcrypt.hash(req.body.password, 10);
+      const update = { $set: payload };
+      if (payload.active === false || payload.passwordHash) update.$inc = { authVersion: 1 };
+      const updated = await User.findOneAndUpdate({ _id: user._id, deletedAt: null }, update, { new: true, runValidators: true }).select("-passwordHash -authVersion").lean();
+      if (!updated) return res.status(404).json({ error: "Usuario no encontrado." });
+      return res.json(updated);
+    } catch (error) {
+      if (error.code === 11000) return res.status(409).json({ error: "Ese correo ya está registrado." });
+      next(error);
     }
-    if (typeof req.body?.password === "string" && req.body.password.length >= 6) {
-      payload.passwordHash = await bcrypt.hash(req.body.password, 10);
-    }
+  });
 
-    const updated = await User.findByIdAndUpdate(req.params.id, payload, { new: true })
-      .select("-passwordHash")
-      .lean();
-    if (!updated) return res.status(404).json({ error: "Usuario no encontrado." });
-    res.json(updated);
+  router.delete("/users/:id", async (req, res, next) => {
+    try {
+      if (!validUserId(req.params.id)) return res.status(400).json({ error: "ID inválido." });
+      if (req.body && (typeof req.body !== "object" || Array.isArray(req.body) || Object.keys(req.body).length)) return res.status(400).json({ error: "Campos no permitidos." });
+      const user = await User.findOne({ _id: req.params.id, deletedAt: null }).lean();
+      if (!user) return res.status(404).json({ error: "Usuario no encontrado." });
+      const protection = await accessChangeError(req.user, user, {}, true);
+      if (protection) return res.status(409).json({ error: protection });
+      const updated = await User.findOneAndUpdate({ _id: user._id, deletedAt: null }, { $set: { active: false, deletedAt: new Date() }, $inc: { authVersion: 1 } }, { new: true, runValidators: true }).select("-passwordHash -authVersion").lean();
+      if (!updated) return res.status(404).json({ error: "Usuario no encontrado." });
+      return res.json(updated);
+    } catch (error) { next(error); }
   });
 
   return router;
