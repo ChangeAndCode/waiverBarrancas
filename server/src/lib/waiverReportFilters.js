@@ -20,6 +20,15 @@ export function waiverAdminReportFilter({ query: input }, now = new Date()) {
     const expression = { $eq: [{ $size: originalAttractionsExpression }, 0] };
     query.$expr = query.$expr ? { $and: [query.$expr, expression] } : expression;
   }
+  const age = String(input.age || '').trim();
+  if (age && !['adult', 'minor'].includes(age)) throw new ReportInputError('Edad inválida.');
+  if (age === 'adult') query.isMinor = false;
+  if (age === 'minor') query.isMinor = true;
+  const state = String(input.state || '').trim();
+  if (state) {
+    const safeState = state.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    query['participant.cityState'] = { $regex: `(?:^|,|\\s)${safeState}(?:$|,|\\s)`, $options: 'i' };
+  }
   const status = String(input.status || '').trim();
   if (status && !['pending', 'approved', 'rejected', 'revoked', 'other'].includes(status)) throw new ReportInputError('Estado inválido.');
   if (status) query.status = status === 'pending' ? { $in: ['pending', 'signed'] } : status === 'other' ? { $nin: ['pending', 'signed', 'approved', 'rejected', 'revoked'] } : status;
