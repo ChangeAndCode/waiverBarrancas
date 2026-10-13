@@ -115,6 +115,7 @@ app.get(/^\/(?!api).*/, (_req, res) => {
 });
 
 app.use((error, _req, res, _next) => {
+  if (error.type === "entity.parse.failed") return res.status(400).json({ error: "JSON inválido." });
   console.error(error);
   res.status(500).json({ error: "Error interno del servidor." });
 });

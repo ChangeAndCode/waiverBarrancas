@@ -5,6 +5,7 @@ export function signAuthToken(user, jwtSecret) {
   return jwt.sign(
     {
       sub: user._id.toString(),
+      authVersion: user.authVersion || 0,
       role: user.role,
       email: user.email,
       name: user.name
@@ -22,15 +23,15 @@ export function requireAuth(jwtSecret) {
     try {
       const claims = jwt.verify(token, jwtSecret);
       const userId = String(claims.sub || "").trim();
-      if (!userId) {
+      if (!/^[a-f0-9]{24}$/i.test(userId) || claims.purpose || claims.waiverId) {
         return res.status(401).json({ error: "Token inválido." });
       }
 
-      const user = await User.findOne({ _id: userId, active: true })
-        .select("name email role active")
+      const user = await User.findOne({ _id: userId, active: true, deletedAt: null })
+        .select("name email role active authVersion deletedAt")
         .lean();
 
-      if (!user) {
+      if (!user || (claims.authVersion ?? 0) !== (user.authVersion ?? 0)) {
         return res.status(401).json({ error: "Usuario inactivo o no encontrado." });
       }
 
@@ -63,6 +64,7 @@ export function requireRoles(...roles) {
 // Permisos de negocio centralizados. La autorización siempre se aplica en el
 // backend; el frontend únicamente refleja estos permisos en la interfaz.
 export const ROLE_PERMISSIONS = Object.freeze({
+  taquilla: Object.freeze(["auth.login", "waiver.scan", "waiver.read.scanned"]),
   staff: Object.freeze([
     "auth.login",
     "waiver.scan",

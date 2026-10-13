@@ -1,3 +1,6 @@
+import { waiverAdminReportFilter } from '../lib/waiverReportFilters.js';
+import { dashboardMetrics } from '../lib/dashboardMetrics.js';
+import { validateUserPayload, validUserId, accessChangeError } from "../lib/userAccess.js";
 import { isWaiverQrExpired, qrWriteGuard } from "../lib/waiverValidity.js";
 import { activitySummaries } from "../lib/additionalActivities.js";
 import { Router } from "express";
@@ -13,57 +16,6 @@ import { WaiverAuditEvent } from "../models/WaiverAuditEvent.js";
 const MAX_CSV_ROWS = 50000;
 const waiverSelectLean =
   "-signatureImage -guardian.signatureImage -witness.signatureImage -waiverTextSnapshot";
-
-function escapeRegex(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function waiverAdminReportFilter(req) {
-  const query = { deletedAt: null };
-  if (req.query.attractionId) {
-    query.$and = [{ $or: [
-      { attractionId: req.query.attractionId },
-      { "additionalActivities.attractionId": req.query.attractionId }
-    ] }];
-  }
-  const age = String(req.query.age || "").trim();
-  if (age === "adult") query.isMinor = false;
-  if (age === "minor") query.isMinor = true;
-  const state = String(req.query.state || "").trim();
-  if (state) query["participant.cityState"] = { $regex: `(?:^|,|\\s)${escapeRegex(state)}(?:$|,|\\s)`, $options: "i" };
-  const st = String(req.query.status || "").trim();
-  if (["pending", "approved", "rejected", "revoked"].includes(st)) {
-    query.status = st === "pending" ? { $in: ["pending", "signed"] } : st;
-  }
-  if (req.query.from || req.query.to) {
-    query.createdAt = {};
-    if (req.query.from) query.createdAt.$gte = new Date(req.query.from);
-    if (req.query.to) {
-      const to = new Date(req.query.to);
-      to.setUTCDate(to.getUTCDate() + 1);
-      query.createdAt.$lt = to;
-    }
-  }
-  const period = String(req.query.period || "").trim();
-  if (["previous", "active", "upcoming"].includes(period)) {
-    const now = new Date();
-    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chihuahua" }).format(now);
-    if (period === "previous") query.visitDate = { $lt: today };
-    if (period === "active") query.visitDate = today;
-    if (period === "upcoming") query.visitDate = { $gt: today };
-  }
-  const q = String(req.query.q || "").trim();
-  if (q) {
-    const safe = escapeRegex(q);
-    const textMatch = { $or: [
-      { "participant.fullName": { $regex: safe, $options: "i" } },
-      { "participant.email": { $regex: safe, $options: "i" } }
-    ] };
-    if (query.$and) query.$and.push(textMatch);
-    else query.$and = [textMatch];
-  }
-  return query;
-}
 
 function csvCell(v) {
   const s = v == null ? "" : String(v);
@@ -287,8 +239,13 @@ export function adminRoutes({ jwtSecret }) {
     });
   });
 
+  router.get('/reports/metrics', async (req, res, next) => {
+    try { res.json(await dashboardMetrics(req.query)); } catch (error) { if (error.status === 400) return res.status(400).json({ error: error.message }); next(error); }
+  });
+
   router.get("/reports/waivers", async (req, res) => {
-    const filter = waiverAdminReportFilter(req);
+    let filter;
+    try { filter = waiverAdminReportFilter(req); } catch (error) { return res.status(error.status || 500).json({ error: error.message }); }
     const page = Math.max(1, parseInt(String(req.query.page || "1"), 10) || 1);
     const pageSizeRaw = parseInt(String(req.query.pageSize || "25"), 10) || 25;
     const pageSize = Math.min(200, Math.max(1, pageSizeRaw));
@@ -356,7 +313,8 @@ export function adminRoutes({ jwtSecret }) {
   });
 
   router.get("/reports/waivers/export.csv", async (req, res) => {
-    const filter = waiverAdminReportFilter(req);
+    let filter;
+    try { filter = waiverAdminReportFilter(req); } catch (error) { return res.status(error.status || 500).json({ error: error.message }); }
     const exportAt = nowMs();
     const rows = await Waiver.find(filter)
       .select(waiverSelectLean)
@@ -455,51 +413,67 @@ export function adminRoutes({ jwtSecret }) {
     res.send(body);
   });
 
-  router.get("/users", async (_req, res) => {
-    const users = await User.find().sort({ createdAt: -1 }).select("-passwordHash").lean();
-    res.json(users);
+  router.get("/users", async (_req, res, next) => {
+    try {
+      res.json(await User.find().sort({ createdAt: -1 }).select("-passwordHash -authVersion").lean());
+    } catch (error) { next(error); }
   });
 
-  router.post("/users", async (req, res) => {
-    const name = String(req.body?.name || "").trim();
-    const email = String(req.body?.email || "").toLowerCase().trim();
-    const password = String(req.body?.password || "");
-    const role = req.body?.role;
-
-    if (!name || !email || !password || !["admin", "staff"].includes(role)) {
-      return res.status(400).json({ error: "Datos de usuario inválidos." });
+  router.post("/users", async (req, res, next) => {
+    try {
+      const error = validateUserPayload(req.body, true);
+      if (error) return res.status(400).json({ error });
+      const { name, password, role } = req.body;
+      const email = req.body.email.toLowerCase().trim();
+      if (await User.findOne({ email })) return res.status(409).json({ error: "Ese correo ya está registrado." });
+      const created = await User.create({ name: name.trim(), email, role, passwordHash: await bcrypt.hash(password, 10), active: true });
+      return res.status(201).json({ id: created._id, name: created.name, email: created.email, role: created.role, active: created.active, deletedAt: created.deletedAt });
+    } catch (error) {
+      if (error.code === 11000) return res.status(409).json({ error: "Ese correo ya está registrado." });
+      next(error);
     }
-
-    const exists = await User.findOne({ email });
-    if (exists) return res.status(409).json({ error: "Ese correo ya está registrado." });
-
-    const passwordHash = await bcrypt.hash(password, 10);
-    const created = await User.create({ name, email, passwordHash, role, active: true });
-    res.status(201).json({
-      id: created._id,
-      name: created.name,
-      email: created.email,
-      role: created.role,
-      active: created.active
-    });
   });
 
-  router.patch("/users/:id", async (req, res) => {
-    const payload = {};
-    if (typeof req.body?.name === "string") payload.name = req.body.name.trim();
-    if (typeof req.body?.active === "boolean") payload.active = req.body.active;
-    if (typeof req.body?.role === "string" && ["admin", "staff"].includes(req.body.role)) {
-      payload.role = req.body.role;
+  router.patch("/users/:id", async (req, res, next) => {
+    try {
+      if (!validUserId(req.params.id)) return res.status(400).json({ error: "ID inválido." });
+      const error = validateUserPayload(req.body);
+      if (error) return res.status(400).json({ error });
+      const user = await User.findOne({ _id: req.params.id, deletedAt: null }).lean();
+      if (!user) return res.status(404).json({ error: "Usuario no encontrado." });
+      const protection = await accessChangeError(req.user, user, req.body);
+      if (protection) return res.status(409).json({ error: protection });
+      const payload = {};
+      for (const field of ["name", "email", "role", "active"]) if (field in req.body) payload[field] = req.body[field];
+      if (payload.name !== undefined) payload.name = payload.name.trim();
+      if (payload.email !== undefined) {
+        payload.email = payload.email.toLowerCase().trim();
+        if (await User.findOne({ email: payload.email, _id: { $ne: user._id } })) return res.status(409).json({ error: "Ese correo ya está registrado." });
+      }
+      if (req.body.password !== undefined) payload.passwordHash = await bcrypt.hash(req.body.password, 10);
+      const update = { $set: payload };
+      if (payload.active === false || payload.passwordHash) update.$inc = { authVersion: 1 };
+      const updated = await User.findOneAndUpdate({ _id: user._id, deletedAt: null }, update, { new: true, runValidators: true }).select("-passwordHash -authVersion").lean();
+      if (!updated) return res.status(404).json({ error: "Usuario no encontrado." });
+      return res.json(updated);
+    } catch (error) {
+      if (error.code === 11000) return res.status(409).json({ error: "Ese correo ya está registrado." });
+      next(error);
     }
-    if (typeof req.body?.password === "string" && req.body.password.length >= 6) {
-      payload.passwordHash = await bcrypt.hash(req.body.password, 10);
-    }
+  });
 
-    const updated = await User.findByIdAndUpdate(req.params.id, payload, { new: true })
-      .select("-passwordHash")
-      .lean();
-    if (!updated) return res.status(404).json({ error: "Usuario no encontrado." });
-    res.json(updated);
+  router.delete("/users/:id", async (req, res, next) => {
+    try {
+      if (!validUserId(req.params.id)) return res.status(400).json({ error: "ID inválido." });
+      if (req.body && (typeof req.body !== "object" || Array.isArray(req.body) || Object.keys(req.body).length)) return res.status(400).json({ error: "Campos no permitidos." });
+      const user = await User.findOne({ _id: req.params.id, deletedAt: null }).lean();
+      if (!user) return res.status(404).json({ error: "Usuario no encontrado." });
+      const protection = await accessChangeError(req.user, user, {}, true);
+      if (protection) return res.status(409).json({ error: protection });
+      const updated = await User.findOneAndUpdate({ _id: user._id, deletedAt: null }, { $set: { active: false, deletedAt: new Date() }, $inc: { authVersion: 1 } }, { new: true, runValidators: true }).select("-passwordHash -authVersion").lean();
+      if (!updated) return res.status(404).json({ error: "Usuario no encontrado." });
+      return res.json(updated);
+    } catch (error) { next(error); }
   });
 
   return router;
