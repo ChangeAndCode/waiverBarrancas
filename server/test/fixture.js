@@ -66,12 +66,15 @@ export function testApp(mock) {
     return valuesAt(obj?.[path[0]], path.slice(1));
   };
   const matches = (w, filter) => Object.entries(filter).every(([key, value]) => {
+    if (key === "$and") return value.every((clause) => matches(w, clause));
+    if (key === "$or") return value.some((clause) => matches(w, clause));
     if (key === "$expr") return new Date(value.$gt[0].$literal) > new Date();
     const values = valuesAt(w, key.split("."));
     if (value === null) return values.every(v => v == null);
     if (value && typeof value === "object") {
       if (value.$elemMatch) return (w[key] || []).some(a => matches(a, value.$elemMatch));
       if (value.$ne !== undefined) return values.every(v => String(v) !== String(value.$ne));
+      if (value.$lt !== undefined) return values.some(v => String(v) < String(value.$lt));
       if (value.$gt !== undefined) return values.some(v => new Date(v) > value.$gt);
       if (value.$regex) return values.some(v => new RegExp(value.$regex, value.$options).test(String(v)));
       if (value.$in) return values.some(v => value.$in.some(item => String(v) === String(item)));

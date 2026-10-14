@@ -1496,6 +1496,8 @@ async function reviewStaffWaiver(decision) {
     if (adminReportFilters.to) p.set("to", adminReportFilters.to);
     if (adminReportFilters.status) p.set("status", adminReportFilters.status);
     if (adminReportFilters.period) p.set("period", adminReportFilters.period);
+    if (adminReportFilters.age) p.set("age", adminReportFilters.age);
+    if (adminReportFilters.state) p.set("state", adminReportFilters.state);
     const qv = adminReportFilters.q.trim();
     if (qv) p.set("q", qv);
     if (includePagination) {
@@ -1559,6 +1561,12 @@ async function reviewStaffWaiver(decision) {
 
   function applyAdminReportFilters() {
     adminReportExpectedTotal = null;
+    adminReport = { ...adminReport, page: 1 };
+    loadAdminReport();
+  }
+
+  function clearAdminReportFilters() {
+    adminReportFilters = emptyReportFilters();
     adminReport = { ...adminReport, page: 1 };
     loadAdminReport();
   }
@@ -2367,6 +2375,7 @@ async function reviewStaffWaiver(decision) {
             Filtros aplican a la tabla y al CSV. El archivo incluye hasta 50 mil filas con los mismos filtros (sin imágenes de firma).
           </p>
           <div class="filter-row">
+            <label class="field-label" for="repAttr">Actividad</label>
             <label class="field-label" for="repAttr">Atracción</label>
             <select id="repAttr" value={adminReportFilters.attraction === "none" ? "none" : adminReportFilters.attractionId} on:change={event => {
               const value = event.currentTarget.value;
@@ -2411,10 +2420,24 @@ async function reviewStaffWaiver(decision) {
               <option value="active">Activas hoy</option>
               <option value="upcoming">Próximas</option>
             </select>
+            <label class="field-label" for="repAge">Edad</label>
+            <select id="repAge" bind:value={adminReportFilters.age}>
+              <option value="">Todas</option>
+              <option value="adult">Mayor de edad</option>
+              <option value="minor">Menor de edad</option>
+            </select>
+            <label class="field-label" for="repState">Procedencia</label>
+            <select id="repState" bind:value={adminReportFilters.state}>
+              <option value="">Todos los estados</option>
+              {#each MEXICO_STATES as state}
+                <option value={state}>{state}</option>
+              {/each}
+            </select>
             <label class="field-label" for="repQ">Buscar</label>
             <input id="repQ" bind:value={adminReportFilters.q} placeholder="Nombre o correo" />
             <div class="inline-actions filter-actions">
               <button type="button" on:click={applyAdminReportFilters} disabled={loading}>Aplicar</button>
+              <button type="button" class="secondary" on:click={clearAdminReportFilters} disabled={loading}>Limpiar filtros</button>
               <button type="button" on:click={downloadAdminReportCsv} disabled={loading}>Descargar CSV</button>
             </div>
           </div>

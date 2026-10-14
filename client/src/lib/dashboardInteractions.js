@@ -1,6 +1,6 @@
 import { parkDate } from '../../../shared/visitSchedule.js';
 export function metricsSelection(selection, now = new Date()) { return selection.followCurrent ? { ...selection, anchor: parkDate(now) } : selection; }
-export const emptyReportFilters = () => ({ attractionId: '', attraction: '', provenance: '', from: '', to: '', until: '', status: '', period: '', q: '' });
+export const emptyReportFilters = () => ({ attractionId: '', attraction: '', provenance: '', from: '', to: '', until: '', status: '', period: '', age: '', state: '', q: '' });
 export function metricReportFilters(data, kind, row) {
   const filters = emptyReportFilters();
   const range = kind === 'current' ? row : kind === 'interval' ? row : data.period;

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { testApp, payload, staffToken, adminToken, secret, staff, visitor } from "./fixture.js";
+import { testApp, payload, staffToken, adminToken, secret, staff, visitor, attractions } from "./fixture.js";
 import { verifyWaiverToken, signWaiverToken } from "../src/lib/token.js";
 import { signAuthToken } from "../src/lib/auth.js";
 import { parkDate } from "../../shared/visitSchedule.js";
@@ -157,6 +157,45 @@ assert.equal(report.data.items[0].visitDate, created.data.visitDate);
   records.get(legacyId).status = "approved";
   assert.equal((await request(`/reports/validate/${legacy}`, "GET", undefined, staffToken)).data.valid, true);
   assert.equal((await request(`/reports/validate/${legacy}`, "GET", undefined, staffToken)).data.reason, "qr_already_used");
+});
+
+test("admin report filters combine age, origin, activity, status and visit period", async (t) => {
+  const { app, records } = testApp(t.mock);
+  const server = app.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const request = async (path) => {
+    const r = await fetch(`http://127.0.0.1:${server.address().port}/api${path}`, {
+      headers: { Authorization: `Bearer ${adminToken}` }
+    });
+    return { status: r.status, data: await r.json() };
+  };
+
+  const today = parkDate();
+  const recordsToAdd = [
+    { _id: "507f1f77bcf86cd799439021", isMinor: false, status: "approved", visitDate: today, participant: { fullName: "Adulto Chihuahua", email: "adult@example.test", cityState: "Chihuahua, Chihuahua" }, attractionId: attractions[0]._id, additionalActivities: [] },
+    { _id: "507f1f77bcf86cd799439022", isMinor: true, status: "rejected", visitDate: "2099-01-01", participant: { fullName: "Menor Sonora", email: "minor@example.test", cityState: "Hermosillo, Sonora" }, attractionId: attractions[1]._id, additionalActivities: [] },
+    { _id: "507f1f77bcf86cd799439023", isMinor: false, status: "approved", visitDate: "2020-01-01", participant: { fullName: "Adulto Actividad Extra", email: "extra@example.test", cityState: "Monterrey, Nuevo León" }, attractionId: attractions[0]._id, additionalActivities: [{ attractionId: attractions[2]._id, attractionName: attractions[2].name, status: "pending" }] }
+  ];
+  for (const row of recordsToAdd) records.set(row._id, { ...row, deletedAt: null, createdAt: new Date() });
+
+  const combined = await request(`/admin/reports/waivers?age=adult&state=Chihuahua&status=approved&period=active`);
+  assert.equal(combined.status, 200);
+  assert.equal(combined.data.total, 1);
+  assert.equal(combined.data.items[0].fullName, "Adulto Chihuahua");
+
+  const previousActivity = await request(`/admin/reports/waivers?period=previous&attractionId=${attractions[2]._id}`);
+  assert.equal(previousActivity.status, 200);
+  assert.equal(previousActivity.data.total, 1);
+  assert.equal(previousActivity.data.items[0].fullName, "Adulto Actividad Extra");
+
+  const minors = await request("/admin/reports/waivers?age=minor&status=rejected");
+  assert.equal(minors.data.total, 1);
+  assert.equal(minors.data.items[0].fullName, "Menor Sonora");
+
+  const empty = await request("/admin/reports/waivers?age=minor&status=approved");
+  assert.equal(empty.data.total, 0);
+  assert.deepEqual(empty.data.items, []);
 });
 
 test("provider failure preserves registration and returns the QR without claiming delivery", async (t) => {
